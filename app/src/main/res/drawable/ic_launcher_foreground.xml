@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Left pane folder accent -->
+    <path
+        android:fillColor="#FF9800"
+        android:pathData="M24,36h20l5,5h2c2.2,0 4,1.8 4,4v25c0,2.2 -1.8,4 -4,4H24c-2.2,0 -4,-1.8 -4,-4V40c0,-2.2 1.8,-4 4,-4z" />
+    <!-- Right pane accent -->
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M59,40h25c2.2,0 4,1.8 4,4v26c0,2.2 -1.8,4 -4,4H59c-2.2,0 -4,-1.8 -4,-4V44c0,-2.2 1.8,-4 4,-4z" />
+    <!-- Center divider arrow -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,51h8v-4l6,7 -6,7v-4h-8z" />
+</vector>
