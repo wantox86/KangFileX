@@ -6,16 +6,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidth
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -30,8 +24,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.wantox86.kangfilex.presentation.model.MainUiState
 import com.wantox86.kangfilex.presentation.model.PaneId
@@ -112,6 +107,7 @@ fun DualPaneScreen(
             } else {
                 PortraitSwipeDualPaneContent(
                     maxWidthDp = maxWidth,
+                    screenWidthPx = constraints.maxWidth,
                     uiState = uiState,
                     leftListState = leftListState,
                     rightListState = rightListState,
@@ -181,6 +177,7 @@ private fun LandscapeDualPaneContent(
 @Composable
 private fun PortraitSwipeDualPaneContent(
     maxWidthDp: androidx.compose.ui.unit.Dp,
+    screenWidthPx: Int,
     uiState: MainUiState,
     leftListState: androidx.compose.foundation.lazy.LazyListState,
     rightListState: androidx.compose.foundation.lazy.LazyListState,
@@ -191,15 +188,18 @@ private fun PortraitSwipeDualPaneContent(
     val scope = rememberCoroutineScope()
 
     val barWidthDp = (maxWidthDp * 0.16f).coerceIn(58.dp, 72.dp)
-    val paneWidthDp = (maxWidthDp - barWidthDp).coerceAtLeast(200.dp)
-    val paneWidthPx = with(density) { paneWidthDp.toPx() }
+    val barWidthPx = with(density) { barWidthDp.roundToPx() }.coerceIn(0, screenWidthPx)
+    val paneWidthPx = (screenWidthPx - barWidthPx).coerceAtLeast(1)
+    val paneWidthPxFloat = paneWidthPx.toFloat()
 
-    // offset = 0f -> Left Pane + Center Action Bar visible
-    // offset = -paneWidthPx -> Center Action Bar + Right Pane visible
-    val offsetX = remember { Animatable(0f) }
+    // offset = 0f -> Left Pane [0, W - A] + Center Action Bar [W - A, W]
+    // offset = -(W - A) -> Center Action Bar [0, A] + Right Pane [A, W]
+    val offsetX = remember {
+        Animatable(if (uiState.activePane == PaneId.LEFT) 0f else -paneWidthPxFloat)
+    }
 
-    LaunchedEffect(uiState.activePane, paneWidthPx) {
-        val target = if (uiState.activePane == PaneId.LEFT) 0f else -paneWidthPx
+    LaunchedEffect(uiState.activePane, paneWidthPxFloat) {
+        val target = if (uiState.activePane == PaneId.LEFT) 0f else -paneWidthPxFloat
         if (offsetX.value != target) {
             offsetX.animateTo(
                 targetValue = target,
@@ -213,46 +213,13 @@ private fun PortraitSwipeDualPaneContent(
 
     val dragState = rememberDraggableState { delta ->
         scope.launch {
-            val clamped = (offsetX.value + delta).coerceIn(-paneWidthPx, 0f)
+            val clamped = (offsetX.value + delta).coerceIn(-paneWidthPxFloat, 0f)
             offsetX.snapTo(clamped)
         }
     }
 
-    Box(
-        contentAlignment = Alignment.TopStart,
-        modifier = Modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .draggable(
-                state = dragState,
-                orientation = Orientation.Horizontal,
-                onDragStopped = { velocity ->
-                    val targetPane = when {
-                        velocity < -500f -> PaneId.RIGHT
-                        velocity > 500f -> PaneId.LEFT
-                        offsetX.value < -paneWidthPx / 2f -> PaneId.RIGHT
-                        else -> PaneId.LEFT
-                    }
-                    viewModel.setActivePane(targetPane)
-                    val targetOffset = if (targetPane == PaneId.LEFT) 0f else -paneWidthPx
-                    scope.launch {
-                        offsetX.animateTo(
-                            targetValue = targetOffset,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            )
-                        )
-                    }
-                }
-            )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxHeight()
-                .requiredWidth(paneWidthDp * 2 + barWidthDp)
-                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-        ) {
+    Layout(
+        content = {
             FilePane(
                 paneState = uiState.leftPane,
                 isActivePane = uiState.activePane == PaneId.LEFT,
@@ -263,10 +230,7 @@ private fun PortraitSwipeDualPaneContent(
                 onBreadcrumbClick = { viewModel.onBreadcrumbClick(PaneId.LEFT, it) },
                 onNodeClick = { viewModel.onNodeClick(PaneId.LEFT, it) },
                 onNodeCheckboxToggle = { viewModel.onNodeCheckboxToggle(PaneId.LEFT, it) },
-                onNetworkSectionClick = { viewModel.onNetworkSectionClick(it) },
-                modifier = Modifier
-                    .width(paneWidthDp)
-                    .fillMaxHeight()
+                onNetworkSectionClick = { viewModel.onNetworkSectionClick(it) }
             )
 
             CenterActionBar(
@@ -277,10 +241,7 @@ private fun PortraitSwipeDualPaneContent(
                 onDirectionClick = { viewModel.toggleActivePane() },
                 onUpDirClick = { viewModel.onUpDir() },
                 onSelectAllOrClearClick = { viewModel.onSelectAllOrClear() },
-                onPhase2ActionClick = { viewModel.onPhase2ActionClick(it) },
-                modifier = Modifier
-                    .width(barWidthDp)
-                    .fillMaxHeight()
+                onPhase2ActionClick = { viewModel.onPhase2ActionClick(it) }
             )
 
             FilePane(
@@ -293,11 +254,56 @@ private fun PortraitSwipeDualPaneContent(
                 onBreadcrumbClick = { viewModel.onBreadcrumbClick(PaneId.RIGHT, it) },
                 onNodeClick = { viewModel.onNodeClick(PaneId.RIGHT, it) },
                 onNodeCheckboxToggle = { viewModel.onNodeCheckboxToggle(PaneId.RIGHT, it) },
-                onNetworkSectionClick = { viewModel.onNetworkSectionClick(it) },
-                modifier = Modifier
-                    .width(paneWidthDp)
-                    .fillMaxHeight()
+                onNetworkSectionClick = { viewModel.onNetworkSectionClick(it) }
             )
+        },
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Horizontal,
+                onDragStopped = { velocity ->
+                    val targetPane = when {
+                        velocity < -500f -> PaneId.RIGHT
+                        velocity > 500f -> PaneId.LEFT
+                        offsetX.value < -paneWidthPxFloat / 2f -> PaneId.RIGHT
+                        else -> PaneId.LEFT
+                    }
+                    viewModel.setActivePane(targetPane)
+                    val targetOffset = if (targetPane == PaneId.LEFT) 0f else -paneWidthPxFloat
+                    scope.launch {
+                        offsetX.animateTo(
+                            targetValue = targetOffset,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )
+                    }
+                }
+            )
+    ) { measurables, constraints ->
+        val screenWidth = constraints.maxWidth
+        val screenHeight = constraints.maxHeight
+        val actualBarWidth = barWidthPx.coerceIn(0, screenWidth)
+        val actualPaneWidth = (screenWidth - actualBarWidth).coerceAtLeast(0)
+
+        val leftPlaceable = measurables[0].measure(
+            Constraints.fixed(width = actualPaneWidth, height = screenHeight)
+        )
+        val barPlaceable = measurables[1].measure(
+            Constraints.fixed(width = actualBarWidth, height = screenHeight)
+        )
+        val rightPlaceable = measurables[2].measure(
+            Constraints.fixed(width = actualPaneWidth, height = screenHeight)
+        )
+
+        layout(screenWidth, screenHeight) {
+            val x = offsetX.value.roundToInt().coerceIn(-actualPaneWidth, 0)
+            leftPlaceable.place(x = x, y = 0)
+            barPlaceable.place(x = x + actualPaneWidth, y = 0)
+            rightPlaceable.place(x = x + actualPaneWidth + actualBarWidth, y = 0)
         }
     }
 }
