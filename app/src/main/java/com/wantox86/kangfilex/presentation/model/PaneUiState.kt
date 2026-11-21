@@ -12,6 +12,7 @@ data class PaneUiState(
     val selectedIds: Set<String> = emptySet(),
     val focusedDirChildCount: Pair<Int, Int>? = null,
     val isAllInFocusedDirSelected: Boolean = false,
+    val isClearActionMode: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 ) {

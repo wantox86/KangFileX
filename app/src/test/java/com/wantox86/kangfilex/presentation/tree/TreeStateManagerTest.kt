@@ -132,4 +132,68 @@ class TreeStateManagerTest {
         assertFalse(manager.toggleSelectAllOrClear())
         assertTrue(manager.getSelectedIds().isEmpty())
     }
+
+    @Test
+    fun isClearActionModeSyncsWithToggleSelectAllOrClear() {
+        val manager = TreeStateManager("local")
+        manager.setVolumes(listOf(internalVolume))
+
+        val rootPath = "/storage/emulated/0"
+        val rootId = manager.nodeId(rootPath)
+        val emptyDirPath = "$rootPath/Empty"
+        val emptyDirId = manager.nodeId(emptyDirPath)
+        val f1 = file("$rootPath/a.txt", "a.txt")
+        val f2 = file("$rootPath/b.txt", "b.txt")
+        val f3 = file("$rootPath/c.txt", "c.txt")
+
+        manager.setExpanded(rootId, true)
+        manager.setChildren(rootId, listOf(f1, f2, f3))
+        manager.setChildren(emptyDirId, emptyList())
+        manager.setFocusedTarget(rootPath)
+
+        // 1. Empty selection -> Sel All mode
+        assertFalse(manager.isClearActionMode())
+
+        // 2. Partial selection (1 of 3) -> still Sel All mode; clicking selects all
+        manager.toggleSelection(manager.nodeId(f1))
+        assertEquals(1, manager.getSelectedIds().size)
+        assertFalse(manager.isClearActionMode())
+        assertTrue(manager.toggleSelectAllOrClear())
+        assertEquals(3, manager.getSelectedIds().size)
+
+        // 3. Full selection (3 of 3) -> Clear mode; clicking clears all
+        assertTrue(manager.isClearActionMode())
+        assertFalse(manager.toggleSelectAllOrClear())
+        assertTrue(manager.getSelectedIds().isEmpty())
+        assertFalse(manager.isClearActionMode())
+
+        // 4. Selection in another folder while focused folder is empty -> Clear mode
+        manager.toggleSelection(manager.nodeId(f2))
+        manager.setFocusedTarget(emptyDirPath)
+        assertTrue(manager.isClearActionMode())
+        assertFalse(manager.toggleSelectAllOrClear())
+        assertTrue(manager.getSelectedIds().isEmpty())
+        assertFalse(manager.isClearActionMode())
+    }
+
+    @Test
+    fun setVolumesResetsFocusedTargetWhenActiveVolumeRemoved() {
+        val sdCardVolume = StorageVolumeInfo(
+            id = "local_sd",
+            label = "SD Card",
+            rootPath = "/storage/ABCD-1234",
+            totalBytes = 200_000L,
+            usedBytes = 50_000L,
+            availableBytes = 150_000L,
+            isRemovable = true
+        )
+        val manager = TreeStateManager("local")
+        manager.setVolumes(listOf(internalVolume, sdCardVolume))
+        manager.setFocusedTarget("/storage/ABCD-1234/Music")
+        assertEquals("/storage/ABCD-1234/Music", manager.getFocusedPath())
+
+        // SD card unmounted -> focused target must reset to remaining primary volume root
+        manager.setVolumes(listOf(internalVolume))
+        assertEquals("/storage/emulated/0", manager.getFocusedPath())
+    }
 }

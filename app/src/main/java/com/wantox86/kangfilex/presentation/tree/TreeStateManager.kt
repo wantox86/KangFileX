@@ -29,7 +29,8 @@ class TreeStateManager(
                 providerId = providerId
             )
         }
-        if (focusedTargetPath == null || findVolumeForPath(focusedTargetPath) == null) {
+        val currentFocused = focusedTargetPath
+        if (currentFocused == null || findMatchingVolumeForPath(currentFocused) == null) {
             focusedTargetPath = newVolumes.firstOrNull()?.rootPath
         }
     }
@@ -118,16 +119,26 @@ class TreeStateManager(
     }
 
     /**
+     * Returns true if calling [toggleSelectAllOrClear] will clear the current selection
+     * rather than selecting all children in the focused directory.
+     */
+    fun isClearActionMode(): Boolean {
+        val focused = focusedTargetPath
+        val children = focused?.let { childrenByNodeId[nodeId(it)] }.orEmpty()
+        val allFocusedSelected = children.isNotEmpty() && children.all { selectedIds.contains(nodeId(it)) }
+        return allFocusedSelected || (selectedIds.isNotEmpty() && children.isEmpty())
+    }
+
+    /**
      * Toggles Select All / Clear:
-     * - If any items are selected and either all children in focused dir are selected or focused dir has no loaded children -> clear all.
+     * - If [isClearActionMode] is true -> clear all selections.
      * - Otherwise select all direct children of the focused directory.
      */
     fun toggleSelectAllOrClear(): Boolean {
         val focused = focusedTargetPath
         val children = focused?.let { childrenByNodeId[nodeId(it)] }.orEmpty()
-        val allFocusedSelected = children.isNotEmpty() && children.all { selectedIds.contains(nodeId(it)) }
 
-        return if (allFocusedSelected || (children.isEmpty() && selectedIds.isNotEmpty())) {
+        return if (isClearActionMode()) {
             selectedIds.clear()
             false
         } else if (children.isNotEmpty()) {
@@ -167,13 +178,17 @@ class TreeStateManager(
 
     fun findVolumeForPath(path: String?): StorageVolumeInfo? {
         if (path == null) return volumes.firstOrNull()
+        return findMatchingVolumeForPath(path) ?: volumes.firstOrNull()
+    }
+
+    private fun findMatchingVolumeForPath(path: String): StorageVolumeInfo? {
         val normalized = normalizePath(path)
         return volumes
             .sortedByDescending { it.rootPath.length }
             .firstOrNull { vol ->
                 val root = normalizePath(vol.rootPath)
                 normalized == root || normalized.startsWith("$root/")
-            } ?: volumes.firstOrNull()
+            }
     }
 
     fun getFocusedDirChildCount(): Pair<Int, Int>? {

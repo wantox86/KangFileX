@@ -48,7 +48,7 @@ import com.wantox86.kangfilex.presentation.ui.theme.KangColors
 fun CenterActionBar(
     activePane: PaneId,
     hasSelection: Boolean,
-    isAllSelected: Boolean,
+    isClearActionMode: Boolean,
     hasClipboardItems: Boolean,
     onDirectionClick: () -> Unit,
     onUpDirClick: () -> Unit,
@@ -168,12 +168,11 @@ fun CenterActionBar(
         HorizontalDivider(color = KangColors.Divider, thickness = 1.dp)
 
         // Phase 1 active: Select All / Clear
-        val showClear = isAllSelected || hasSelection
         ActionBarButton(
-            icon = if (showClear) Icons.Default.Deselect else Icons.Default.SelectAll,
-            label = if (showClear) "Clear" else "Sel All",
+            icon = if (isClearActionMode) Icons.Default.Deselect else Icons.Default.SelectAll,
+            label = if (isClearActionMode) "Clear" else "Sel All",
             enabled = true,
-            highlight = showClear,
+            highlight = isClearActionMode,
             onClick = onSelectAllOrClearClick
         )
 

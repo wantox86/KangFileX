@@ -24,10 +24,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalDensity
@@ -49,7 +49,7 @@ fun DualPaneScreen(
     viewModel: DualPaneViewModel,
     onRequestStoragePermission: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val leftListState = rememberLazyListState()
     val rightListState = rememberLazyListState()
@@ -58,15 +58,19 @@ fun DualPaneScreen(
         viewModel.events.collect { event ->
             when (event) {
                 is UiEvent.ShowSnackbar -> {
-                    snackbarHostState.currentSnackbarData?.dismiss()
-                    snackbarHostState.showSnackbar(
-                        message = event.message,
-                        duration = SnackbarDuration.Short
-                    )
+                    launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        snackbarHostState.showSnackbar(
+                            message = event.message,
+                            duration = SnackbarDuration.Short
+                        )
+                    }
                 }
                 is UiEvent.ScrollToNode -> {
                     val targetList = if (event.paneId == PaneId.LEFT) leftListState else rightListState
-                    targetList.animateScrollToItem(event.index.coerceAtLeast(0))
+                    launch {
+                        targetList.animateScrollToItem(event.index.coerceAtLeast(0))
+                    }
                 }
             }
         }
@@ -147,7 +151,7 @@ private fun LandscapeDualPaneContent(
         CenterActionBar(
             activePane = uiState.activePane,
             hasSelection = uiState.activePaneState.hasSelection,
-            isAllSelected = uiState.activePaneState.isAllInFocusedDirSelected,
+            isClearActionMode = uiState.activePaneState.isClearActionMode,
             hasClipboardItems = uiState.hasClipboardItems,
             onDirectionClick = { viewModel.toggleActivePane() },
             onUpDirClick = { viewModel.onUpDir() },
@@ -268,7 +272,7 @@ private fun PortraitSwipeDualPaneContent(
             CenterActionBar(
                 activePane = uiState.activePane,
                 hasSelection = uiState.activePaneState.hasSelection,
-                isAllSelected = uiState.activePaneState.isAllInFocusedDirSelected,
+                isClearActionMode = uiState.activePaneState.isClearActionMode,
                 hasClipboardItems = uiState.hasClipboardItems,
                 onDirectionClick = { viewModel.toggleActivePane() },
                 onUpDirClick = { viewModel.onUpDir() },

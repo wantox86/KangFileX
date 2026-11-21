@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 sealed interface UiEvent {
@@ -34,7 +35,8 @@ sealed interface UiEvent {
 class DualPaneViewModel(
     private val vfsProvider: VfsProvider,
     private val storageVolumeProvider: StorageVolumeProvider,
-    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
 
     private val leftTree = TreeStateManager(vfsProvider.providerId)
@@ -56,10 +58,12 @@ class DualPaneViewModel(
             initializedAfterGrant = true
             loadInitialStorage()
         } else if (!granted) {
-            val volumes = storageVolumeProvider.getVolumes()
-            leftTree.setVolumes(volumes)
-            rightTree.setVolumes(volumes)
-            syncBothPanes()
+            viewModelScope.launch(mainDispatcher) {
+                val volumes = withContext(ioDispatcher) { storageVolumeProvider.getVolumes() }
+                leftTree.setVolumes(volumes)
+                rightTree.setVolumes(volumes)
+                syncBothPanes()
+            }
         }
     }
 
@@ -183,7 +187,7 @@ class DualPaneViewModel(
     private fun loadInitialStorage() {
         viewModelScope.launch(mainDispatcher) {
             vfsProvider.connect()
-            val volumes = storageVolumeProvider.getVolumes()
+            val volumes = withContext(ioDispatcher) { storageVolumeProvider.getVolumes() }
             leftTree.setVolumes(volumes)
             rightTree.setVolumes(volumes)
 
@@ -207,7 +211,7 @@ class DualPaneViewModel(
 
     private suspend fun refreshPaneInternal(paneId: PaneId) {
         val tree = treeFor(paneId)
-        val volumes = storageVolumeProvider.getVolumes()
+        val volumes = withContext(ioDispatcher) { storageVolumeProvider.getVolumes() }
         tree.setVolumes(volumes)
         updatePane(paneId) { it.copy(isLoading = true, errorMessage = null) }
 
@@ -276,6 +280,7 @@ class DualPaneViewModel(
         val selected = tree.getSelectedIds()
         val childCount = tree.getFocusedDirChildCount()
         val allSelected = tree.isAllSelectedInFocusedDir()
+        val clearActionMode = tree.isClearActionMode()
 
         updatePane(paneId) { current ->
             current.copy(
@@ -286,7 +291,8 @@ class DualPaneViewModel(
                 nodes = flattened,
                 selectedIds = selected,
                 focusedDirChildCount = childCount,
-                isAllInFocusedDirSelected = allSelected
+                isAllInFocusedDirSelected = allSelected,
+                isClearActionMode = clearActionMode
             )
         }
     }

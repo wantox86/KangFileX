@@ -70,7 +70,8 @@ class DualPaneViewModelTest {
         return DualPaneViewModel(
             vfsProvider = provider,
             storageVolumeProvider = volumeProvider,
-            mainDispatcher = dispatcher
+            mainDispatcher = dispatcher,
+            ioDispatcher = dispatcher
         )
     }
 
@@ -104,13 +105,16 @@ class DualPaneViewModelTest {
         assertEquals(listOf("Internal Storage", "Download"), expandedState.breadcrumbs.map { it.label })
 
         // Select All in focused dir (Download -> app.apk)
+        assertFalse(vm.uiState.value.leftPane.isClearActionMode)
         vm.onSelectAllOrClear(PaneId.LEFT)
         assertEquals(1, vm.uiState.value.leftPane.selectedCount)
         assertTrue(vm.uiState.value.leftPane.isAllInFocusedDirSelected)
+        assertTrue(vm.uiState.value.leftPane.isClearActionMode)
 
         // Clear selection
         vm.onSelectAllOrClear(PaneId.LEFT)
         assertEquals(0, vm.uiState.value.leftPane.selectedCount)
+        assertFalse(vm.uiState.value.leftPane.isClearActionMode)
 
         // Up Dir collapses Download and returns focus to Internal Storage
         vm.onUpDir(PaneId.LEFT)
