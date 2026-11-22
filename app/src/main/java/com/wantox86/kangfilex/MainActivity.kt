@@ -25,6 +25,7 @@ import com.wantox86.kangfilex.data.local.StorageVolumeDetector
 import com.wantox86.kangfilex.presentation.ui.DualPaneScreen
 import com.wantox86.kangfilex.presentation.ui.theme.KangFileXTheme
 import com.wantox86.kangfilex.presentation.viewmodel.DualPaneViewModel
+import com.wantox86.kangfilex.service.TransferForegroundService
 
 class MainActivity : ComponentActivity() {
 
@@ -38,6 +39,25 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         viewModel.onPermissionChanged(hasAllFilesAccess())
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // Hasil diabaikan; transfer tetap berjalan tanpa notifikasi bila ditolak
+    }
+
+    fun ensureNotificationPermissionAndStartService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        TransferForegroundService.start(this)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
