@@ -433,6 +433,141 @@ class TransferQueueManagerTest {
         }
     }
 
+    @Test
+    fun notificationOutcomeNotLostForFastJobWithoutCollector() = runBlocking {
+        val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val provider = LocalVfsProvider(ioDispatcher = Dispatchers.IO)
+        val manager = TransferQueueManager(
+            vfsProvider = provider,
+            scope = managerScope,
+            ioDispatcher = Dispatchers.IO
+        )
+
+        try {
+            val srcDir = tempFolder.newFolder("src_fast_notif")
+            val dstDir = tempFolder.newFolder("dst_fast_notif")
+            val srcFile = File(srcDir, "fast.txt").apply { writeText("cepat") }
+
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-fast",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(srcFile)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+
+            withTimeout(5_000) { manager.state.first { !it.isBusy } }
+
+            val outcome = manager.pollNotificationOutcome()
+            assertTrue(outcome is TransferOutcome.Completed)
+            assertEquals("job-fast", outcome?.jobId)
+            assertNull(manager.pollNotificationOutcome())
+        } finally {
+            managerScope.cancel()
+        }
+    }
+
+    @Test
+    fun notificationOutcomesBufferedForMultipleJobsInOrder() = runBlocking {
+        val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val provider = LocalVfsProvider(ioDispatcher = Dispatchers.IO)
+        val manager = TransferQueueManager(
+            vfsProvider = provider,
+            scope = managerScope,
+            ioDispatcher = Dispatchers.IO
+        )
+
+        try {
+            val srcDir = tempFolder.newFolder("src_multi_notif")
+            val dstDir = tempFolder.newFolder("dst_multi_notif")
+            val file1 = File(srcDir, "satu.txt").apply { writeText("satu") }
+            val file2 = File(srcDir, "dua.txt").apply { writeText("dua") }
+
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-notif-1",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(file1)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-notif-2",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(file2)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+
+            withTimeout(5_000) { manager.state.first { !it.isBusy } }
+
+            val firstOutcome = manager.pollNotificationOutcome()
+            val secondOutcome = manager.pollNotificationOutcome()
+            assertTrue(firstOutcome is TransferOutcome.Completed)
+            assertEquals("job-notif-1", firstOutcome?.jobId)
+            assertTrue(secondOutcome is TransferOutcome.Completed)
+            assertEquals("job-notif-2", secondOutcome?.jobId)
+            assertNull(manager.pollNotificationOutcome())
+        } finally {
+            managerScope.cancel()
+        }
+    }
+
+    @Test
+    fun cancelledJobNotificationOutcomeAvailableAfterIdle() = runBlocking {
+        val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val local = LocalVfsProvider(ioDispatcher = Dispatchers.IO)
+        val firstChunkWritten = CountDownLatch(1)
+        val releaseWrite = CountDownLatch(1)
+        val gatedProvider = GatedWriteVfsProvider(
+            delegate = local,
+            targetFileName = "cancel_notif.bin",
+            onWriteChunk = { chunkIndex ->
+                if (chunkIndex == 1) {
+                    firstChunkWritten.countDown()
+                    releaseWrite.await(5, TimeUnit.SECONDS)
+                }
+            }
+        )
+        val manager = TransferQueueManager(
+            vfsProvider = gatedProvider,
+            scope = managerScope,
+            ioDispatcher = Dispatchers.IO,
+            engineBufferSize = 1024
+        )
+
+        try {
+            val srcDir = tempFolder.newFolder("src_cancel_notif")
+            val dstDir = tempFolder.newFolder("dst_cancel_notif")
+            val slowFile = File(srcDir, "cancel_notif.bin").apply { writeBytes(ByteArray(8 * 1024) { 9 }) }
+
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-cancel-notif",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(slowFile)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+            assertTrue(firstChunkWritten.await(5, TimeUnit.SECONDS))
+
+            manager.cancelActive()
+            releaseWrite.countDown()
+
+            withTimeout(5_000) { manager.state.first { !it.isBusy } }
+
+            val outcome = manager.pollNotificationOutcome()
+            assertTrue(outcome is TransferOutcome.Cancelled)
+            assertEquals("job-cancel-notif", outcome?.jobId)
+            assertNull(manager.pollNotificationOutcome())
+        } finally {
+            releaseWrite.countDown()
+            managerScope.cancel()
+        }
+    }
+
     private fun collectOutcomes(
         scope: CoroutineScope,
         manager: TransferQueueManager

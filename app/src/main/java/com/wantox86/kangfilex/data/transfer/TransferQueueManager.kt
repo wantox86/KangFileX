@@ -16,14 +16,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -85,6 +88,22 @@ class TransferQueueManager(
         extraBufferCapacity = 32
     )
     val outcomes: SharedFlow<TransferOutcome> = _outcomes.asSharedFlow()
+
+    private val _notificationOutcomes = Channel<TransferOutcome>(Channel.UNLIMITED)
+
+    /**
+     * Aliran outcome khusus untuk SATU konsumen (service notifikasi).
+     * Setiap outcome dibuffer di channel sampai diambil sehingga tidak hilang sebelum
+     * collector terpasang atau saat service berhenti. Untuk UI tetap gunakan [outcomes].
+     */
+    val notificationOutcomes: Flow<TransferOutcome>
+        get() = _notificationOutcomes.receiveAsFlow()
+
+    /**
+     * Mengambil satu outcome notifikasi yang dibuffer tanpa menangguhkan coroutine, atau `null`
+     * jika kosong. Dikonsumsi oleh SATU konsumen (service); untuk UI tetap gunakan [outcomes].
+     */
+    fun pollNotificationOutcome(): TransferOutcome? = _notificationOutcomes.tryReceive().getOrNull()
 
     fun enqueue(request: TransferRequest) {
         synchronized(lock) {
@@ -285,6 +304,7 @@ class TransferQueueManager(
         }
 
         if (finalOutcome != null) {
+            _notificationOutcomes.trySend(finalOutcome)
             _outcomes.emit(finalOutcome)
         }
     }

@@ -34,7 +34,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class TransferForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var collectorsStarted = false
+    private var outcomeCollectorStarted = false
+    private var stateCollectorStarted = false
     private var lastProgressNotifyMs = 0L
     private var lastNotifiedJobId: String? = null
 
@@ -46,24 +47,27 @@ class TransferForegroundService : Service() {
         val manager = TransferQueueManager.getInstance()
         startForegroundCompat(buildProgressNotification(manager.state.value))
 
+        if (!outcomeCollectorStarted) {
+            outcomeCollectorStarted = true
+            startOutcomeObserver(manager)
+        }
+
         if (intent?.action == ACTION_CANCEL) {
             manager.cancelActive()
             if (!manager.state.value.isBusy) {
-                stopForegroundCompat()
-                stopSelf()
+                drainOutcomesAndStop(manager)
                 return START_NOT_STICKY
             }
         }
 
         if (!manager.state.value.isBusy) {
-            stopForegroundCompat()
-            stopSelf()
+            drainOutcomesAndStop(manager)
             return START_NOT_STICKY
         }
 
-        if (!collectorsStarted) {
-            collectorsStarted = true
-            startObservers(manager)
+        if (!stateCollectorStarted) {
+            stateCollectorStarted = true
+            startStateObserver(manager)
         }
 
         return START_NOT_STICKY
@@ -74,19 +78,20 @@ class TransferForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun startObservers(manager: TransferQueueManager) {
+    private fun startOutcomeObserver(manager: TransferQueueManager) {
         serviceScope.launch {
-            manager.outcomes.collect { outcome ->
+            manager.notificationOutcomes.collect { outcome ->
                 val notification = buildResultNotification(outcome)
                 notifySafe(nextResultNotificationId(), notification)
             }
         }
+    }
 
+    private fun startStateObserver(manager: TransferQueueManager) {
         serviceScope.launch {
             manager.state.collect { uiState ->
                 if (!uiState.isBusy) {
-                    stopForegroundCompat()
-                    stopSelf()
+                    drainOutcomesAndStop(manager)
                     return@collect
                 }
 
@@ -100,6 +105,15 @@ class TransferForegroundService : Service() {
                 }
             }
         }
+    }
+
+    private fun drainOutcomesAndStop(manager: TransferQueueManager) {
+        while (true) {
+            val outcome = manager.pollNotificationOutcome() ?: break
+            notifySafe(nextResultNotificationId(), buildResultNotification(outcome))
+        }
+        stopForegroundCompat()
+        stopSelf()
     }
 
     private fun createNotificationChannels() {
