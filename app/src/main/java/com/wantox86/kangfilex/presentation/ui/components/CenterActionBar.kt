@@ -142,7 +142,7 @@ fun CenterActionBar(
         ActionBarButton(
             icon = Icons.Default.ContentPaste,
             label = "Paste",
-            enabled = true,
+            enabled = hasClipboardItems,
             muted = !hasClipboardItems,
             onClick = onPasteClick
         )

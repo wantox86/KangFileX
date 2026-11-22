@@ -185,6 +185,14 @@ class TransferEngine(
             coroutineContext.ensureActive()
 
             val source = entry.file
+
+            // Symlink folder dilewati agar tidak menyalin/menghapus target symlink dan menjaga folder induk pada MOVE
+            if (source.isDirectory && source.isSymlink) {
+                errors.add("Folder '${source.name}' adalah symlink dan dilewati (symlink folder tidak didukung)")
+                emitProgress(currentFileName = source.name, force = true)
+                return false
+            }
+
             val initialDestPath = ConflictResolver.joinPath(targetDirPath, source.name)
 
             val finalDestPath: String
@@ -213,6 +221,18 @@ class TransferEngine(
                         isMergeDir = false
                     }
                     ConflictAction.OVERWRITE -> {
+                        val existing = findExistingFile(initialDestPath)
+                        if (existing != null && existing.isDirectory != source.isDirectory) {
+                            val sourceType = if (source.isDirectory) "folder" else "file"
+                            val existingType = if (existing.isDirectory) "folder" else "file"
+                            errors.add(
+                                "Tidak bisa menimpa: '${source.name}' adalah $sourceType tetapi tujuan sudah ada sebagai $existingType"
+                            )
+                            filesCompleted += entry.totalFileCount
+                            progressBytes += entry.totalByteSize
+                            emitProgress(currentFileName = source.name, force = true)
+                            return false
+                        }
                         finalDestPath = initialDestPath
                         overwrite = true
                         isMergeDir = source.isDirectory
@@ -300,6 +320,14 @@ class TransferEngine(
             return allChildrenSucceeded
         }
 
+        /**
+         * Menyalin satu file secara streaming dari sumber ke tujuan.
+         *
+         * Batasan yang diketahui (known limitation): pada mode [ConflictAction.OVERWRITE],
+         * file tujuan lama sudah ter-truncate saat stream output dibuka. Akibatnya, jika
+         * transfer dibatalkan atau gagal di tengah jalan, file tujuan (termasuk isi lamanya)
+         * akan dihapus bersama sisa parsial sesuai spesifikasi penghapusan file parsial.
+         */
         private suspend fun processFile(
             source: VfsFile,
             destFilePath: String,

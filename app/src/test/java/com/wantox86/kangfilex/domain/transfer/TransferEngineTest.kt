@@ -14,6 +14,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -21,6 +22,7 @@ import java.io.File
 import java.io.FilterOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.file.Files
 import kotlin.random.Random
 
 class TransferEngineTest {
@@ -481,6 +483,262 @@ class TransferEngineTest {
         } catch (_: TransferException) {
             // expected
         }
+    }
+
+    @Test
+    fun copySymlinkDirectorySkipsWithErrorAndLeavesTargetIntact() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val engine = TransferEngine(sourceProvider = provider, ioDispatcher = dispatcher)
+
+        val srcRoot = tempFolder.newFolder("src_symlink_copy")
+        val targetDir = tempFolder.newFolder("target_symlink_copy")
+        val targetFile = File(targetDir, "inside.txt").apply { writeText("TARGET_DATA") }
+        val symlinkDir = File(srcRoot, "link_dir")
+        createSymbolicLinkOrSkip(symlinkDir, targetDir)
+
+        val dstDir = tempFolder.newFolder("dst_symlink_copy")
+        val symlinkVfs = provider.listFiles(srcRoot.absolutePath)
+            .getOrThrow()
+            .first { it.name == "link_dir" }
+        assertTrue(symlinkVfs.isDirectory)
+        assertTrue(symlinkVfs.isSymlink)
+
+        val result = engine.execute(
+            request = TransferRequest(
+                jobId = "job-symlink-copy",
+                operation = TransferOperation.COPY,
+                sources = listOf(symlinkVfs),
+                destDirPath = dstDir.absolutePath
+            ),
+            onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+        )
+
+        assertEquals(0, result.filesTransferred)
+        assertEquals(1, result.errors.size)
+        assertTrue(result.errors.first().contains("symlink", ignoreCase = true))
+
+        val destEntry = File(dstDir, "link_dir")
+        assertFalse(destEntry.exists())
+        assertFalse(Files.isSymbolicLink(destEntry.toPath()))
+        assertTrue(targetDir.exists())
+        assertEquals("TARGET_DATA", targetFile.readText())
+    }
+
+    @Test
+    fun moveSymlinkDirectorySkipsWithErrorAndPreservesSourceSymlink() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val engine = TransferEngine(sourceProvider = provider, ioDispatcher = dispatcher)
+
+        val srcRoot = tempFolder.newFolder("src_symlink_move")
+        val targetDir = tempFolder.newFolder("target_symlink_move")
+        val targetFile = File(targetDir, "inside.txt").apply { writeText("TARGET_MOVE") }
+        val symlinkDir = File(srcRoot, "link_dir")
+        createSymbolicLinkOrSkip(symlinkDir, targetDir)
+
+        val dstDir = tempFolder.newFolder("dst_symlink_move")
+        val symlinkVfs = provider.listFiles(srcRoot.absolutePath)
+            .getOrThrow()
+            .first { it.name == "link_dir" }
+        assertTrue(symlinkVfs.isDirectory)
+        assertTrue(symlinkVfs.isSymlink)
+
+        val result = engine.execute(
+            request = TransferRequest(
+                jobId = "job-symlink-move",
+                operation = TransferOperation.MOVE,
+                sources = listOf(symlinkVfs),
+                destDirPath = dstDir.absolutePath
+            ),
+            onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+        )
+
+        assertEquals(0, result.filesTransferred)
+        assertTrue(result.errors.isNotEmpty())
+        assertTrue(result.errors.first().contains("symlink", ignoreCase = true))
+        assertTrue(Files.isSymbolicLink(symlinkDir.toPath()))
+
+        val destEntry = File(dstDir, "link_dir")
+        assertFalse(destEntry.exists())
+        assertFalse(Files.isSymbolicLink(destEntry.toPath()))
+        assertEquals("TARGET_MOVE", targetFile.readText())
+    }
+
+    @Test
+    fun copyDirectoryContainingSymlinkDirCopiesRegularFilesAndSkipsSymlink() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val engine = TransferEngine(sourceProvider = provider, ioDispatcher = dispatcher)
+
+        val srcRoot = tempFolder.newFolder("src_mixed_symlink")
+        val outerDir = File(srcRoot, "outer").apply { mkdirs() }
+        File(outerDir, "normal.txt").writeText("NORMAL_CONTENT")
+
+        val targetDir = tempFolder.newFolder("target_mixed_symlink")
+        File(targetDir, "secret.txt").writeText("DO_NOT_COPY")
+        val nestedSymlink = File(outerDir, "nested_link")
+        createSymbolicLinkOrSkip(nestedSymlink, targetDir)
+
+        val dstDir = tempFolder.newFolder("dst_mixed_symlink")
+        val outerVfs = provider.listFiles(srcRoot.absolutePath)
+            .getOrThrow()
+            .first { it.name == "outer" }
+
+        val result = engine.execute(
+            request = TransferRequest(
+                jobId = "job-mixed-symlink",
+                operation = TransferOperation.COPY,
+                sources = listOf(outerVfs),
+                destDirPath = dstDir.absolutePath
+            ),
+            onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+        )
+
+        assertEquals(1, result.filesTransferred)
+        assertEquals(1, result.errors.size)
+        assertTrue(result.errors.first().contains("symlink", ignoreCase = true))
+        assertEquals("NORMAL_CONTENT", File(dstDir, "outer/normal.txt").readText())
+
+        val copiedLink = File(dstDir, "outer/nested_link")
+        assertFalse(copiedLink.exists())
+        assertFalse(Files.isSymbolicLink(copiedLink.toPath()))
+    }
+
+    @Test
+    fun overwriteFolderOntoExistingFileRecordsSingleErrorAndLeavesBothIntact() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val engine = TransferEngine(sourceProvider = provider, ioDispatcher = dispatcher)
+
+        val srcDir = tempFolder.newFolder("src_mismatch_dir_to_file")
+        val dstDir = tempFolder.newFolder("dst_mismatch_dir_to_file")
+
+        val srcFolder = File(srcDir, "x").apply { mkdirs() }
+        val srcFile1 = File(srcFolder, "f1.txt").apply { writeText("ONE") }
+        val srcFile2 = File(srcFolder, "f2.txt").apply { writeText("TWO") }
+        val dstFile = File(dstDir, "x").apply { writeText("EXISTING_FILE") }
+
+        val result = engine.execute(
+            request = TransferRequest(
+                jobId = "job-mismatch-dir-to-file",
+                operation = TransferOperation.COPY,
+                sources = listOf(toVfsFile(srcFolder)),
+                destDirPath = dstDir.absolutePath
+            ),
+            onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+        )
+
+        assertEquals(0, result.filesTransferred)
+        assertEquals(0, result.filesSkipped)
+        assertEquals(1, result.errors.size)
+        val errorMsg = result.errors.first()
+        assertTrue(errorMsg.contains("folder", ignoreCase = true))
+        assertTrue(errorMsg.contains("file", ignoreCase = true))
+
+        assertTrue(dstFile.isFile)
+        assertEquals("EXISTING_FILE", dstFile.readText())
+        assertTrue(srcFolder.isDirectory)
+        assertEquals("ONE", srcFile1.readText())
+        assertEquals("TWO", srcFile2.readText())
+    }
+
+    @Test
+    fun overwriteFileOntoExistingFolderRecordsSingleErrorAndLeavesFolderIntact() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val engine = TransferEngine(sourceProvider = provider, ioDispatcher = dispatcher)
+
+        val srcDir = tempFolder.newFolder("src_mismatch_file_to_dir")
+        val dstDir = tempFolder.newFolder("dst_mismatch_file_to_dir")
+
+        val srcFile = File(srcDir, "y").apply { writeText("SOURCE_FILE") }
+        val dstFolder = File(dstDir, "y").apply { mkdirs() }
+        val dstInner = File(dstFolder, "keep.txt").apply { writeText("KEEP_ME") }
+
+        val result = engine.execute(
+            request = TransferRequest(
+                jobId = "job-mismatch-file-to-dir",
+                operation = TransferOperation.COPY,
+                sources = listOf(toVfsFile(srcFile)),
+                destDirPath = dstDir.absolutePath
+            ),
+            onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+        )
+
+        assertEquals(0, result.filesTransferred)
+        assertEquals(0, result.filesSkipped)
+        assertEquals(1, result.errors.size)
+        val errorMsg = result.errors.first()
+        assertTrue(errorMsg.contains("file", ignoreCase = true))
+        assertTrue(errorMsg.contains("folder", ignoreCase = true))
+
+        assertTrue(dstFolder.isDirectory)
+        assertTrue(dstInner.exists())
+        assertEquals("KEEP_ME", dstInner.readText())
+        assertTrue(srcFile.isFile)
+        assertEquals("SOURCE_FILE", srcFile.readText())
+    }
+
+    @Test
+    fun siblingPrefixDirectoryIsAllowedWhileTrueSubfolderThrowsTransferException() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val engine = TransferEngine(sourceProvider = provider, ioDispatcher = dispatcher)
+
+        val root = tempFolder.newFolder("a")
+        val dirB = File(root, "b").apply { mkdirs() }
+        val fileInB = File(dirB, "item.txt").apply { writeText("konten-b") }
+        val dirBc = File(root, "bc").apply { mkdirs() }
+        val vfsDirB = toVfsFile(dirB)
+
+        // Sibling with shared prefix (/a/b -> /a/bc) must be allowed
+        val result = engine.execute(
+            request = TransferRequest(
+                jobId = "job-sibling-prefix",
+                operation = TransferOperation.COPY,
+                sources = listOf(vfsDirB),
+                destDirPath = dirBc.absolutePath
+            ),
+            onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+        )
+
+        assertEquals(1, result.filesTransferred)
+        assertTrue(result.errors.isEmpty())
+        val copiedFile = File(dirBc, "b/item.txt")
+        assertTrue(copiedFile.exists())
+        assertEquals("konten-b", copiedFile.readText())
+        assertTrue(fileInB.exists())
+
+        // True subfolder (/a/b -> /a/b/c) must be rejected with TransferException
+        val subC = File(dirB, "c")
+        try {
+            engine.execute(
+                request = TransferRequest(
+                    jobId = "job-true-subfolder",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(vfsDirB),
+                    destDirPath = subC.absolutePath
+                ),
+                onConflict = { ConflictDecision(ConflictAction.OVERWRITE) }
+            )
+            fail("Expected TransferException on copy to true subfolder")
+        } catch (_: TransferException) {
+            // expected
+        }
+        assertFalse(subC.exists())
+    }
+
+    private fun createSymbolicLinkOrSkip(link: File, target: File) {
+        val created = try {
+            Files.createSymbolicLink(link.toPath(), target.toPath())
+            true
+        } catch (_: UnsupportedOperationException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
+        Assume.assumeTrue("Filesystem does not support symbolic links", created)
     }
 
     private fun toVfsFile(file: File, providerId: String = LocalVfsProvider.DEFAULT_PROVIDER_ID): VfsFile {
