@@ -3,18 +3,24 @@ package com.wantox86.kangfilex.presentation.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,8 +37,10 @@ import androidx.compose.ui.unit.dp
 import com.wantox86.kangfilex.presentation.model.MainUiState
 import com.wantox86.kangfilex.presentation.model.PaneId
 import com.wantox86.kangfilex.presentation.ui.components.CenterActionBar
+import com.wantox86.kangfilex.presentation.ui.components.FileOpDialogHost
 import com.wantox86.kangfilex.presentation.ui.components.FilePane
 import com.wantox86.kangfilex.presentation.ui.components.KangTopBar
+import com.wantox86.kangfilex.presentation.ui.components.TransferDialogsHost
 import com.wantox86.kangfilex.presentation.ui.theme.KangColors
 import com.wantox86.kangfilex.presentation.viewmodel.DualPaneViewModel
 import com.wantox86.kangfilex.presentation.viewmodel.UiEvent
@@ -45,6 +53,7 @@ fun DualPaneScreen(
     onRequestStoragePermission: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val transferState by viewModel.transferState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val leftListState = rememberLazyListState()
     val rightListState = rememberLazyListState()
@@ -83,40 +92,72 @@ fun DualPaneScreen(
                 onTogglePaneClick = { viewModel.toggleActivePane() },
                 onRefreshBothClick = { viewModel.onRefreshBoth() },
                 onCollapseAllClick = { viewModel.onCollapseAll() },
-                onAboutClick = {
-                    viewModel.onPhase2ActionClick("KangFileX v0.1.0 (Phase 1) — fitur lengkap")
-                }
+                onAboutClick = { viewModel.onAboutClick() }
             )
         }
     ) { innerPadding ->
-        BoxWithConstraints(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            val isWideLayout = maxWidth >= 600.dp
+            if (transferState.activeJob != null && !transferState.isProgressDialogVisible) {
+                Text(
+                    text = "Transfer berjalan — ketuk untuk lihat progres",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = KangColors.AccentOrange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(KangColors.AccentOrangeSubtle)
+                        .clickable { viewModel.onTransferShowProgress() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
 
-            if (isWideLayout) {
-                LandscapeDualPaneContent(
-                    uiState = uiState,
-                    leftListState = leftListState,
-                    rightListState = rightListState,
-                    viewModel = viewModel,
-                    onRequestStoragePermission = onRequestStoragePermission
-                )
-            } else {
-                PortraitSwipeDualPaneContent(
-                    maxWidthDp = maxWidth,
-                    screenWidthPx = constraints.maxWidth,
-                    uiState = uiState,
-                    leftListState = leftListState,
-                    rightListState = rightListState,
-                    viewModel = viewModel,
-                    onRequestStoragePermission = onRequestStoragePermission
-                )
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                val isWideLayout = maxWidth >= 600.dp
+
+                if (isWideLayout) {
+                    LandscapeDualPaneContent(
+                        uiState = uiState,
+                        leftListState = leftListState,
+                        rightListState = rightListState,
+                        viewModel = viewModel,
+                        onRequestStoragePermission = onRequestStoragePermission
+                    )
+                } else {
+                    PortraitSwipeDualPaneContent(
+                        maxWidthDp = maxWidth,
+                        screenWidthPx = constraints.maxWidth,
+                        uiState = uiState,
+                        leftListState = leftListState,
+                        rightListState = rightListState,
+                        viewModel = viewModel,
+                        onRequestStoragePermission = onRequestStoragePermission
+                    )
+                }
             }
         }
     }
+
+    TransferDialogsHost(
+        state = transferState,
+        onMinimize = { viewModel.onTransferMinimize() },
+        onCancel = { viewModel.onTransferCancel() },
+        onResolveConflict = { viewModel.onResolveConflict(it) }
+    )
+
+    FileOpDialogHost(
+        state = uiState.fileOpDialog,
+        onNewFolderConfirm = { viewModel.onNewFolderConfirm(it) },
+        onRenameConfirm = { viewModel.onRenameConfirm(it) },
+        onDeleteConfirm = { viewModel.onDeleteConfirm() },
+        onDismiss = { viewModel.onFileOpDialogDismiss() }
+    )
 }
 
 @Composable
@@ -152,7 +193,13 @@ private fun LandscapeDualPaneContent(
             onDirectionClick = { viewModel.toggleActivePane() },
             onUpDirClick = { viewModel.onUpDir() },
             onSelectAllOrClearClick = { viewModel.onSelectAllOrClear() },
-            onPhase2ActionClick = { viewModel.onPhase2ActionClick(it) },
+            onCopyClick = { viewModel.onCopyClick() },
+            onMoveClick = { viewModel.onMoveClick() },
+            onClipClick = { viewModel.onClipClick() },
+            onPasteClick = { viewModel.onPasteClick() },
+            onRenameClick = { viewModel.onRenameClick() },
+            onDeleteClick = { viewModel.onDeleteClick() },
+            onNewFolderClick = { viewModel.onNewFolderClick() },
             modifier = Modifier.weight(0.10f)
         )
 
@@ -241,7 +288,13 @@ private fun PortraitSwipeDualPaneContent(
                 onDirectionClick = { viewModel.toggleActivePane() },
                 onUpDirClick = { viewModel.onUpDir() },
                 onSelectAllOrClearClick = { viewModel.onSelectAllOrClear() },
-                onPhase2ActionClick = { viewModel.onPhase2ActionClick(it) }
+                onCopyClick = { viewModel.onCopyClick() },
+                onMoveClick = { viewModel.onMoveClick() },
+                onClipClick = { viewModel.onClipClick() },
+                onPasteClick = { viewModel.onPasteClick() },
+                onRenameClick = { viewModel.onRenameClick() },
+                onDeleteClick = { viewModel.onDeleteClick() },
+                onNewFolderClick = { viewModel.onNewFolderClick() }
             )
 
             FilePane(

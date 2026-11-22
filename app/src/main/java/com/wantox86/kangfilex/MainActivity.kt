@@ -22,6 +22,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wantox86.kangfilex.data.local.StorageVolumeDetector
+import com.wantox86.kangfilex.data.transfer.TransferQueueManager
 import com.wantox86.kangfilex.presentation.ui.DualPaneScreen
 import com.wantox86.kangfilex.presentation.ui.theme.KangFileXTheme
 import com.wantox86.kangfilex.presentation.viewmodel.DualPaneViewModel
@@ -31,7 +32,9 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: DualPaneViewModel by viewModels {
         DualPaneViewModel.Factory(
-            storageVolumeProvider = StorageVolumeDetector(applicationContext)
+            storageVolumeProvider = StorageVolumeDetector(applicationContext),
+            transferQueueManager = TransferQueueManager.getInstance(),
+            startTransferService = { ensureNotificationPermissionAndStartService() }
         )
     }
 

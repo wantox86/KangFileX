@@ -1,6 +1,8 @@
 package com.wantox86.kangfilex.presentation.viewmodel
 
+import com.wantox86.kangfilex.data.local.LocalVfsProvider
 import com.wantox86.kangfilex.data.local.StorageVolumeProvider
+import com.wantox86.kangfilex.data.transfer.TransferQueueManager
 import com.wantox86.kangfilex.domain.model.StorageVolumeInfo
 import com.wantox86.kangfilex.domain.model.VfsFile
 import com.wantox86.kangfilex.domain.vfs.VfsProvider
@@ -8,7 +10,10 @@ import com.wantox86.kangfilex.presentation.model.ClipboardOperation
 import com.wantox86.kangfilex.presentation.model.FileOpDialogState
 import com.wantox86.kangfilex.presentation.model.PaneId
 import com.wantox86.kangfilex.presentation.model.RootNetworkSection
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -19,14 +24,20 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DualPaneViewModelTest {
+
+    @get:Rule
+    val tempFolder = TemporaryFolder()
 
     private val volume = StorageVolumeInfo(
         id = "local_internal",
@@ -43,6 +54,7 @@ class DualPaneViewModelTest {
         val createdDirectories = mutableListOf<String>()
         val renamedPaths = mutableListOf<Pair<String, String>>()
         val deletedPaths = mutableListOf<Pair<String, Boolean>>()
+        val openedOutputs = mutableListOf<String>()
         val existingPaths = mutableSetOf<String>().apply {
             addAll(tree.keys)
             tree.values.forEach { list -> list.forEach { add(it.path) } }
@@ -55,7 +67,11 @@ class DualPaneViewModelTest {
         override suspend fun listFiles(path: String): Result<List<VfsFile>> =
             Result.success(tree[path].orEmpty())
         override suspend fun openInputStream(path: String): InputStream = ByteArrayInputStream(ByteArray(0))
-        override suspend fun openOutputStream(path: String, overwrite: Boolean): OutputStream = ByteArrayOutputStream()
+        override suspend fun openOutputStream(path: String, overwrite: Boolean): OutputStream {
+            openedOutputs.add(path)
+            existingPaths.add(path)
+            return ByteArrayOutputStream()
+        }
         override suspend fun createDirectory(path: String): Result<Unit> {
             createdDirectories.add(path)
             existingPaths.add(path)
@@ -75,9 +91,17 @@ class DualPaneViewModelTest {
         override suspend fun exists(path: String): Boolean = existingPaths.contains(path)
     }
 
-    private fun createViewModelWithProvider(
-        dispatcher: kotlinx.coroutines.CoroutineDispatcher
-    ): Pair<DualPaneViewModel, FakeVfsProvider> {
+    private data class TestEnv(
+        val viewModel: DualPaneViewModel,
+        val provider: FakeVfsProvider,
+        val transferQueueManager: TransferQueueManager,
+        val serviceStartCount: () -> Int
+    )
+
+    private fun createTestEnv(
+        scope: CoroutineScope,
+        dispatcher: CoroutineDispatcher
+    ): TestEnv {
         val root = volume.rootPath
         val download = "$root/Download"
         val provider = FakeVfsProvider(
@@ -94,22 +118,45 @@ class DualPaneViewModelTest {
         val volumeProvider = object : StorageVolumeProvider {
             override fun getVolumes(): List<StorageVolumeInfo> = listOf(volume)
         }
+        var startCount = 0
+        val queueManager = TransferQueueManager(
+            vfsProvider = provider,
+            scope = CoroutineScope(SupervisorJob() + dispatcher),
+            ioDispatcher = dispatcher
+        )
         val vm = DualPaneViewModel(
             vfsProvider = provider,
             storageVolumeProvider = volumeProvider,
+            transferQueueManager = queueManager,
+            startTransferService = { startCount++ },
             mainDispatcher = dispatcher,
             ioDispatcher = dispatcher
         )
-        return vm to provider
+        return TestEnv(
+            viewModel = vm,
+            provider = provider,
+            transferQueueManager = queueManager,
+            serviceStartCount = { startCount }
+        )
     }
 
-    private fun createViewModel(dispatcher: kotlinx.coroutines.CoroutineDispatcher): DualPaneViewModel =
-        createViewModelWithProvider(dispatcher).first
+    private fun createViewModelWithProvider(
+        scope: CoroutineScope,
+        dispatcher: CoroutineDispatcher
+    ): Pair<DualPaneViewModel, FakeVfsProvider> {
+        val env = createTestEnv(scope, dispatcher)
+        return env.viewModel to env.provider
+    }
+
+    private fun createViewModel(
+        scope: CoroutineScope,
+        dispatcher: CoroutineDispatcher
+    ): DualPaneViewModel = createTestEnv(scope, dispatcher).viewModel
 
     @Test
     fun permissionGrantLoadsBothPanesAndSupportsExpandSelectAndUpDir() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val vm = createViewModel(dispatcher)
+        val vm = createViewModel(backgroundScope, dispatcher)
 
         vm.onPermissionChanged(true)
         advanceUntilIdle()
@@ -156,7 +203,7 @@ class DualPaneViewModelTest {
     @Test
     fun switchActivePaneAndEmitPhaseEvents() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val vm = createViewModel(dispatcher)
+        val vm = createViewModel(backgroundScope, dispatcher)
 
         assertEquals(PaneId.LEFT, vm.uiState.value.activePane)
         vm.toggleActivePane()
@@ -169,7 +216,7 @@ class DualPaneViewModelTest {
             received = vm.events.first()
         }
         advanceUntilIdle()
-        vm.onPhase2ActionClick("Copy")
+        vm.onAboutClick()
         advanceUntilIdle()
         job.join()
 
@@ -192,7 +239,7 @@ class DualPaneViewModelTest {
     @Test
     fun newFolderValidatesNamesAndCreatesDirectory() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val (vm, provider) = createViewModelWithProvider(dispatcher)
+        val (vm, provider) = createViewModelWithProvider(backgroundScope, dispatcher)
 
         vm.onPermissionChanged(true)
         advanceUntilIdle()
@@ -231,7 +278,7 @@ class DualPaneViewModelTest {
     @Test
     fun renameRequiresSingleSelectionValidatesAndRenames() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val (vm, provider) = createViewModelWithProvider(dispatcher)
+        val (vm, provider) = createViewModelWithProvider(backgroundScope, dispatcher)
 
         vm.onPermissionChanged(true)
         advanceUntilIdle()
@@ -299,7 +346,7 @@ class DualPaneViewModelTest {
     @Test
     fun deleteShowsConfirmDialogAndDeletesRecursivelyForDirectories() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val (vm, provider) = createViewModelWithProvider(dispatcher)
+        val (vm, provider) = createViewModelWithProvider(backgroundScope, dispatcher)
 
         vm.onPermissionChanged(true)
         advanceUntilIdle()
@@ -337,7 +384,7 @@ class DualPaneViewModelTest {
     @Test
     fun clipboardClipRequiresSelectionAndClearResetsState() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val (vm, _) = createViewModelWithProvider(dispatcher)
+        val (vm, _) = createViewModelWithProvider(backgroundScope, dispatcher)
 
         vm.onPermissionChanged(true)
         advanceUntilIdle()
@@ -363,5 +410,183 @@ class DualPaneViewModelTest {
         vm.onClearClipboard()
         assertFalse(vm.uiState.value.hasClipboardItems)
         assertNull(vm.uiState.value.clipboard)
+    }
+
+    @Test
+    fun copyWithoutSelectionEmitsSnackbarAndDoesNotEnqueue() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val env = createTestEnv(backgroundScope, dispatcher)
+        val vm = env.viewModel
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        var event: UiEvent? = null
+        val job = launch(dispatcher) {
+            event = vm.events.first()
+        }
+        advanceUntilIdle()
+        vm.onCopyClick()
+        advanceUntilIdle()
+        job.join()
+
+        assertTrue(event is UiEvent.ShowSnackbar)
+        assertTrue((event as UiEvent.ShowSnackbar).message.contains("Pilih item"))
+        assertEquals(0, env.serviceStartCount())
+        assertTrue(env.provider.openedOutputs.isEmpty())
+    }
+
+    @Test
+    fun copyWithSelectionEnqueuesTransferAndStartsService() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val env = createTestEnv(backgroundScope, dispatcher)
+        val vm = env.viewModel
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // Focus RIGHT pane on /storage/emulated/0/Download
+        val rightDownload = vm.uiState.value.rightPane.nodes.first { it.file.name == "Download" }
+        vm.onNodeClick(PaneId.RIGHT, rightDownload)
+        advanceUntilIdle()
+        assertEquals("/storage/emulated/0/Download", vm.uiState.value.rightPane.focusedPath)
+
+        // Select notes.txt on LEFT pane (also switches active pane back to LEFT)
+        val leftNotes = vm.uiState.value.leftPane.nodes.first { it.file.name == "notes.txt" }
+        vm.onNodeCheckboxToggle(PaneId.LEFT, leftNotes.id)
+        assertEquals(PaneId.LEFT, vm.uiState.value.activePane)
+
+        vm.onCopyClick()
+        advanceUntilIdle()
+
+        assertEquals(1, env.serviceStartCount())
+        assertTrue(env.provider.openedOutputs.contains("/storage/emulated/0/Download/notes.txt"))
+        assertEquals(0, vm.uiState.value.leftPane.selectedCount)
+    }
+
+    @Test
+    fun clipAndPasteEndToEndCopiesFileToDestination() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val rootDir = tempFolder.newFolder("clip_root")
+        val srcDir = File(rootDir, "src").apply { mkdirs() }
+        val dstDir = File(rootDir, "dst").apply { mkdirs() }
+        val sourceFile = File(srcDir, "sample.txt").apply { writeText("hello kangfilex") }
+
+        val localProvider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val localVolume = StorageVolumeInfo(
+            id = "test_local",
+            label = "Test Storage",
+            rootPath = rootDir.absolutePath,
+            totalBytes = 1_000_000L,
+            usedBytes = 100_000L,
+            availableBytes = 900_000L
+        )
+        val volumeProvider = object : StorageVolumeProvider {
+            override fun getVolumes(): List<StorageVolumeInfo> = listOf(localVolume)
+        }
+        var serviceStarts = 0
+        val queueManager = TransferQueueManager(
+            vfsProvider = localProvider,
+            scope = CoroutineScope(SupervisorJob() + dispatcher),
+            ioDispatcher = dispatcher
+        )
+        val vm = DualPaneViewModel(
+            vfsProvider = localProvider,
+            storageVolumeProvider = volumeProvider,
+            transferQueueManager = queueManager,
+            startTransferService = { serviceStarts++ },
+            mainDispatcher = dispatcher,
+            ioDispatcher = dispatcher
+        )
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // Expand src on LEFT pane, select sample.txt, and clip
+        val leftSrc = vm.uiState.value.leftPane.nodes.first { it.file.name == "src" }
+        vm.onNodeClick(PaneId.LEFT, leftSrc)
+        advanceUntilIdle()
+        val sampleNode = vm.uiState.value.leftPane.nodes.first { it.file.name == "sample.txt" }
+        vm.onNodeCheckboxToggle(PaneId.LEFT, sampleNode.id)
+        vm.onClipClick()
+        assertTrue(vm.uiState.value.hasClipboardItems)
+
+        // Switch to RIGHT pane, focus dst, and paste
+        val rightDst = vm.uiState.value.rightPane.nodes.first { it.file.name == "dst" }
+        vm.onNodeClick(PaneId.RIGHT, rightDst)
+        advanceUntilIdle()
+        assertEquals(PaneId.RIGHT, vm.uiState.value.activePane)
+        assertEquals(dstDir.absolutePath, vm.uiState.value.rightPane.focusedPath)
+
+        vm.onPasteClick()
+        advanceUntilIdle()
+
+        val copiedFile = File(dstDir, "sample.txt")
+        assertEquals(1, serviceStarts)
+        assertTrue(copiedFile.exists())
+        assertEquals("hello kangfilex", copiedFile.readText())
+        assertTrue(sourceFile.exists())
+    }
+
+    @Test
+    fun moveTransfersFileAndRemovesSource() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val rootDir = tempFolder.newFolder("move_root")
+        val srcDir = File(rootDir, "src").apply { mkdirs() }
+        val dstDir = File(rootDir, "dst").apply { mkdirs() }
+        val sourceFile = File(srcDir, "report.txt").apply { writeText("move me") }
+
+        val localProvider = LocalVfsProvider(ioDispatcher = dispatcher)
+        val localVolume = StorageVolumeInfo(
+            id = "test_local",
+            label = "Test Storage",
+            rootPath = rootDir.absolutePath,
+            totalBytes = 1_000_000L,
+            usedBytes = 100_000L,
+            availableBytes = 900_000L
+        )
+        val volumeProvider = object : StorageVolumeProvider {
+            override fun getVolumes(): List<StorageVolumeInfo> = listOf(localVolume)
+        }
+        var serviceStarts = 0
+        val queueManager = TransferQueueManager(
+            vfsProvider = localProvider,
+            scope = CoroutineScope(SupervisorJob() + dispatcher),
+            ioDispatcher = dispatcher
+        )
+        val vm = DualPaneViewModel(
+            vfsProvider = localProvider,
+            storageVolumeProvider = volumeProvider,
+            transferQueueManager = queueManager,
+            startTransferService = { serviceStarts++ },
+            mainDispatcher = dispatcher,
+            ioDispatcher = dispatcher
+        )
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // Focus RIGHT pane on dst
+        val rightDst = vm.uiState.value.rightPane.nodes.first { it.file.name == "dst" }
+        vm.onNodeClick(PaneId.RIGHT, rightDst)
+        advanceUntilIdle()
+
+        // Expand src on LEFT pane and select report.txt
+        val leftSrc = vm.uiState.value.leftPane.nodes.first { it.file.name == "src" }
+        vm.onNodeClick(PaneId.LEFT, leftSrc)
+        advanceUntilIdle()
+        val reportNode = vm.uiState.value.leftPane.nodes.first { it.file.name == "report.txt" }
+        vm.onNodeCheckboxToggle(PaneId.LEFT, reportNode.id)
+        assertEquals(PaneId.LEFT, vm.uiState.value.activePane)
+
+        vm.onMoveClick()
+        advanceUntilIdle()
+
+        val movedFile = File(dstDir, "report.txt")
+        assertEquals(1, serviceStarts)
+        assertTrue(movedFile.exists())
+        assertEquals("move me", movedFile.readText())
+        assertFalse(sourceFile.exists())
+        assertEquals(0, vm.uiState.value.leftPane.selectedCount)
     }
 }
