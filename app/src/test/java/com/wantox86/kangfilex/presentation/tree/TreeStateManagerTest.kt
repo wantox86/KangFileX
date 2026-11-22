@@ -196,4 +196,38 @@ class TreeStateManagerTest {
         manager.setVolumes(listOf(internalVolume))
         assertEquals("/storage/emulated/0", manager.getFocusedPath())
     }
+
+    @Test
+    fun getSelectedFilesReturnsFilesAcrossExpandedFoldersInStableOrder() {
+        val manager = TreeStateManager("local")
+        manager.setVolumes(listOf(internalVolume))
+
+        val rootPath = "/storage/emulated/0"
+        val rootId = manager.nodeId(rootPath)
+        val downloadPath = "$rootPath/Download"
+        val downloadId = manager.nodeId(downloadPath)
+
+        val downloadDir = dir(downloadPath, "Download")
+        val rootFile = file("$rootPath/readme.txt", "readme.txt")
+        val nestedFile = file("$downloadPath/app.apk", "app.apk")
+
+        manager.setExpanded(rootId, true)
+        manager.setChildren(rootId, listOf(rootFile, downloadDir))
+        manager.setExpanded(downloadId, true)
+        manager.setChildren(downloadId, listOf(nestedFile))
+
+        assertTrue(manager.getSelectedFiles().isEmpty())
+
+        manager.toggleSelection(manager.nodeId(rootFile))
+        manager.toggleSelection(manager.nodeId(nestedFile))
+        manager.toggleSelection(manager.nodeId(downloadDir))
+
+        assertEquals(
+            listOf(rootFile, nestedFile, downloadDir),
+            manager.getSelectedFiles()
+        )
+
+        manager.clearSelection()
+        assertTrue(manager.getSelectedFiles().isEmpty())
+    }
 }

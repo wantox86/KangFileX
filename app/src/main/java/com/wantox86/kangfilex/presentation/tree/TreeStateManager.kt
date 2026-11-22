@@ -111,6 +111,20 @@ class TreeStateManager(
 
     fun getSelectedIds(): Set<String> = selectedIds.toSet()
 
+    fun getSelectedFiles(): List<VfsFile> {
+        if (selectedIds.isEmpty()) return emptyList()
+        val filesById = LinkedHashMap<String, VfsFile>()
+        for (root in rootFiles) {
+            filesById[nodeId(root)] = root
+        }
+        for (children in childrenByNodeId.values) {
+            for (child in children) {
+                filesById[nodeId(child)] = child
+            }
+        }
+        return selectedIds.mapNotNull { filesById[it] }
+    }
+
     fun isAllSelectedInFocusedDir(): Boolean {
         val focused = focusedTargetPath ?: return false
         val children = childrenByNodeId[nodeId(focused)] ?: return false

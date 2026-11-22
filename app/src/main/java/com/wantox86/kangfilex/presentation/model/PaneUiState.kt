@@ -25,8 +25,11 @@ data class MainUiState(
     val rightPane: PaneUiState = PaneUiState(PaneId.RIGHT),
     val activePane: PaneId = PaneId.LEFT,
     val hasStoragePermission: Boolean = false,
-    val hasClipboardItems: Boolean = false
+    val clipboard: ClipboardState? = null,
+    val fileOpDialog: FileOpDialogState? = null
 ) {
+    val hasClipboardItems: Boolean get() = clipboard?.items?.isNotEmpty() == true
+
     fun pane(id: PaneId): PaneUiState = when (id) {
         PaneId.LEFT -> leftPane
         PaneId.RIGHT -> rightPane
