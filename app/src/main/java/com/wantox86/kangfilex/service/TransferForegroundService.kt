@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -75,6 +76,7 @@ class TransferForegroundService : Service() {
 
     override fun onDestroy() {
         runCatching { drainPendingOutcomes(TransferQueueManager.getInstance()) }
+            .onFailure { Log.w("TransferFgService", "Gagal drain outcome saat onDestroy: ${it.javaClass.simpleName}") }
         serviceScope.cancel()
         super.onDestroy()
     }

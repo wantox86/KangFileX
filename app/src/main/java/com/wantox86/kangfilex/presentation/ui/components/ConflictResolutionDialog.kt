@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +52,7 @@ fun ConflictResolutionDialog(
     info: ConflictInfo,
     onDecision: (ConflictDecision) -> Unit
 ) {
-    var applyToAll by remember(info) { mutableStateOf(false) }
+    var applyToAll by rememberSaveable(info) { mutableStateOf(false) }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     AlertDialog(
@@ -193,7 +194,7 @@ fun ConflictResolutionDialog(
                         )
                     ) {
                         Text(
-                            text = "Ganti Nama",
+                            text = "Rename",
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
