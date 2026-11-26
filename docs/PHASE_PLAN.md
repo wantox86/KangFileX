@@ -13,8 +13,8 @@ Spesifikasi produk acuan utama ada di [docs/SPEC.md](SPEC.md).
 
 | Phase | Fokus | Status | Branch / Referensi |
 | :--- | :--- | :--- | :--- |
-| **Phase 1: Fondasi & UI Core** | Setup Kotlin/Compose, `LocalVfsProvider`, Dual-Pane swipe portrait + side-by-side landscape, Center Action Bar, Tree-View flattened, multi-select, breadcrumb, `MANAGE_EXTERNAL_STORAGE` | ✅ **Selesai & QA PASS** | PR #1 (`feat/phase-1-core-ui`, commit `608484a`) — menunggu merge user |
-| **Phase 2: Transfer Engine & Operasi File** | Copy/Move antar pane, Clipboard Copy & Paste, Rename, Delete, New Folder, Conflict Dialog, Streaming Transfer Engine, Foreground Service (`dataSync`) | 🔜 **Berikutnya** | Target branch: `feat/phase-2-transfer-engine` |
+| **Phase 1: Fondasi & UI Core** | Setup Kotlin/Compose, `LocalVfsProvider`, Dual-Pane swipe portrait + side-by-side landscape, Center Action Bar, Tree-View flattened, multi-select, breadcrumb, `MANAGE_EXTERNAL_STORAGE` | ✅ **Selesai & QA PASS** | PR #1 (`feat/phase-1-core-ui`) — **merged** ke `main` |
+| **Phase 2: Transfer Engine & Operasi File** | Copy/Move antar pane, Clipboard Copy & Paste, Rename, Delete, New Folder, Conflict Dialog, Streaming Transfer Engine, Foreground Service (`dataSync`) | ✅ **Selesai** (48 tes unit hijau, Review 2 ronde APPROVE, QA emulator `signpdf_qa_api34` lulus; sisa minor: tiket KF-8/KF-9) | PR #2 (`feat/phase-2-transfer-engine`) — **merged** ke `main` |
 | **Phase 3: Server Management, SMB & FTP** | Multi-provider VFS registry, Room DB + Tink Credential Vault, UI `+ Add Server`, `SmbVfsProvider` (SMB2/3) & `FtpVfsProvider` (FTP/FTPES/FTPS) | ⏳ **Rencana** | Target branch: `feat/phase-3-smb-ftp` |
 | **Phase 4: SSH/SFTP, Hardening & QA** | `SftpVfsProvider` (Password & SSH Key + TOFU Host Key), symlink loop guard, transfer >2 GB, optimasi UI, R8/ProGuard & `RELEASE.md` | ⏳ **Rencana** | Target branch: `feat/phase-4-sftp-hardening` |
 | **Post-MVP (Fase 2 Produk)** | Disk Map, WiFi/FTP Server, Archive Explorer, Text/Hex Editor, Cloud Storage, Root Explorer | 📋 **Backlog** | Dikerjakan hanya setelah MVP Phase 4 stabil |
