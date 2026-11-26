@@ -53,7 +53,13 @@ fun CenterActionBar(
     onDirectionClick: () -> Unit,
     onUpDirClick: () -> Unit,
     onSelectAllOrClearClick: () -> Unit,
-    onPhase2ActionClick: (String) -> Unit,
+    onCopyClick: () -> Unit,
+    onMoveClick: () -> Unit,
+    onClipClick: () -> Unit,
+    onPasteClick: () -> Unit,
+    onRenameClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    onNewFolderClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -114,7 +120,7 @@ fun CenterActionBar(
             label = "Copy",
             enabled = true,
             muted = !hasSelection,
-            onClick = { onPhase2ActionClick("Copy antar pane") }
+            onClick = onCopyClick
         )
 
         ActionBarButton(
@@ -122,7 +128,7 @@ fun CenterActionBar(
             label = "Move",
             enabled = true,
             muted = !hasSelection,
-            onClick = { onPhase2ActionClick("Move antar pane") }
+            onClick = onMoveClick
         )
 
         ActionBarButton(
@@ -130,7 +136,7 @@ fun CenterActionBar(
             label = "Clip",
             enabled = true,
             muted = !hasSelection,
-            onClick = { onPhase2ActionClick("Copy to Clipboard") }
+            onClick = onClipClick
         )
 
         ActionBarButton(
@@ -138,7 +144,7 @@ fun CenterActionBar(
             label = "Paste",
             enabled = hasClipboardItems,
             muted = !hasClipboardItems,
-            onClick = { onPhase2ActionClick("Paste") }
+            onClick = onPasteClick
         )
 
         ActionBarButton(
@@ -146,7 +152,7 @@ fun CenterActionBar(
             label = "Rename",
             enabled = true,
             muted = !hasSelection,
-            onClick = { onPhase2ActionClick("Rename") }
+            onClick = onRenameClick
         )
 
         ActionBarButton(
@@ -155,14 +161,14 @@ fun CenterActionBar(
             enabled = true,
             muted = !hasSelection,
             tintOverride = if (hasSelection) KangColors.ErrorRed else null,
-            onClick = { onPhase2ActionClick("Delete") }
+            onClick = onDeleteClick
         )
 
         ActionBarButton(
             icon = Icons.Default.CreateNewFolder,
             label = "New Dir",
             enabled = true,
-            onClick = { onPhase2ActionClick("New Folder") }
+            onClick = onNewFolderClick
         )
 
         HorizontalDivider(color = KangColors.Divider, thickness = 1.dp)
