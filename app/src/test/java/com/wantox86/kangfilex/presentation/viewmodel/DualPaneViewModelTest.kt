@@ -589,4 +589,86 @@ class DualPaneViewModelTest {
         assertFalse(sourceFile.exists())
         assertEquals(0, vm.uiState.value.leftPane.selectedCount)
     }
+
+    @Test
+    fun copyClearsSelectionImmediatelyOnEnqueueEvenWhenAnotherJobIsActive() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val env = createTestEnv(backgroundScope, dispatcher)
+        val vm = env.viewModel
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // Focus RIGHT pane on /storage/emulated/0/Download
+        val rightDownload = vm.uiState.value.rightPane.nodes.first { it.file.name == "Download" }
+        vm.onNodeClick(PaneId.RIGHT, rightDownload)
+        advanceUntilIdle()
+
+        // 1. Select notes.txt on LEFT pane and click Copy -> selection cleared immediately before outcome
+        val leftNotes = vm.uiState.value.leftPane.nodes.first { it.file.name == "notes.txt" }
+        vm.onNodeCheckboxToggle(PaneId.LEFT, leftNotes.id)
+        assertEquals(1, vm.uiState.value.leftPane.selectedCount)
+
+        vm.onCopyClick()
+        assertEquals(0, vm.uiState.value.leftPane.selectedCount)
+        assertTrue(vm.uiState.value.leftPane.selectedIds.isEmpty())
+        assertFalse(vm.uiState.value.leftPane.isClearActionMode)
+
+        // Let first copy finish so /storage/emulated/0/Download/notes.txt exists for conflict
+        advanceUntilIdle()
+
+        // 2. Start a second copy that pauses on conflict (keeps activeJob busy)
+        vm.onNodeCheckboxToggle(PaneId.LEFT, leftNotes.id)
+        vm.onCopyClick()
+        advanceUntilIdle()
+        assertNotNull(vm.transferState.value.activeJob)
+        assertNotNull(vm.transferState.value.pendingConflict)
+
+        // 3. While job is active, select item and enqueue another copy -> selection still cleared immediately
+        vm.onNodeCheckboxToggle(PaneId.LEFT, leftNotes.id)
+        assertEquals(1, vm.uiState.value.leftPane.selectedCount)
+
+        vm.onCopyClick()
+        assertEquals(0, vm.uiState.value.leftPane.selectedCount)
+        assertTrue(vm.uiState.value.leftPane.selectedIds.isEmpty())
+        assertFalse(vm.uiState.value.leftPane.isClearActionMode)
+        assertEquals(1, vm.transferState.value.queuedCount)
+
+        env.transferQueueManager.cancelAll()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun renameCaseOnlyDelegatesToProviderWhenTargetExistsWhileOtherExistingNameFails() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val (vm, provider) = createViewModelWithProvider(backgroundScope, dispatcher)
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // Simulate case-insensitive FS where exists("/storage/emulated/0/NOTES.TXT") is true
+        provider.existingPaths.add("/storage/emulated/0/NOTES.TXT")
+
+        val notesNode = vm.uiState.value.leftPane.nodes.first { it.file.name == "notes.txt" }
+        vm.onNodeCheckboxToggle(PaneId.LEFT, notesNode.id)
+        vm.onRenameClick()
+
+        // Renaming to a different existing name still fails with "sudah ada"
+        vm.onRenameConfirm("Download")
+        advanceUntilIdle()
+        val conflictDialog = vm.uiState.value.fileOpDialog as? FileOpDialogState.Rename
+        assertNotNull(conflictDialog)
+        assertTrue(conflictDialog?.error?.contains("sudah ada") == true)
+        assertTrue(provider.renamedPaths.isEmpty())
+
+        // Case-only rename bypasses ViewModel exists check and delegates to provider
+        vm.onRenameConfirm("NOTES.TXT")
+        advanceUntilIdle()
+        assertEquals(
+            listOf("/storage/emulated/0/notes.txt" to "/storage/emulated/0/NOTES.TXT"),
+            provider.renamedPaths
+        )
+        assertNull(vm.uiState.value.fileOpDialog)
+        assertEquals(0, vm.uiState.value.leftPane.selectedCount)
+    }
 }

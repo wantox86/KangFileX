@@ -334,14 +334,17 @@ class DualPaneViewModel(
         val parentPath = parentPathOf(dialog.file.path)
         val targetPath = joinPath(parentPath, trimmedName)
         val activePane = _uiState.value.activePane
+        val isCaseOnlyRename = trimmedName.equals(dialog.file.name, ignoreCase = true)
 
         viewModelScope.launch(mainDispatcher) {
-            val alreadyExists = withContext(ioDispatcher) { vfsProvider.exists(targetPath) }
-            if (alreadyExists) {
-                _uiState.update {
-                    it.copy(fileOpDialog = dialog.copy(error = "'$trimmedName' sudah ada"))
+            if (!isCaseOnlyRename) {
+                val alreadyExists = withContext(ioDispatcher) { vfsProvider.exists(targetPath) }
+                if (alreadyExists) {
+                    _uiState.update {
+                        it.copy(fileOpDialog = dialog.copy(error = "'$trimmedName' sudah ada"))
+                    }
+                    return@launch
                 }
-                return@launch
             }
 
             val result = withContext(ioDispatcher) {
@@ -483,6 +486,8 @@ class DualPaneViewModel(
             destDirPath = destDirPath
         )
         transferQueueManager.enqueue(request)
+        treeFor(activePane).clearSelection()
+        syncPane(activePane)
         startTransferService()
         _events.tryEmit(UiEvent.ShowSnackbar("Transfer dimulai"))
     }

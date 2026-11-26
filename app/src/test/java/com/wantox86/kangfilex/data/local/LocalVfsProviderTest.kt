@@ -5,11 +5,13 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
 
 class LocalVfsProviderTest {
 
@@ -112,5 +114,49 @@ class LocalVfsProviderTest {
         }
         val read2 = provider.openInputStream(filePath).use { it.readBytes().decodeToString() }
         assertEquals("KangFileX-v2", read2)
+    }
+
+    @Test
+    fun renameCaseOnlySucceedsAndUpdatesFileName() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+
+        val dir = tempFolder.newFolder("case_only_rename")
+        val source = File(dir, "a").apply { writeText("hello-case") }
+        val dest = File(dir, "A")
+
+        val result = provider.rename(source.absolutePath, dest.absolutePath)
+        assertTrue(result.isSuccess)
+        assertTrue(dest.exists())
+        assertEquals("hello-case", dest.readText())
+
+        val names = dir.listFiles()?.map { it.name }.orEmpty()
+        assertTrue(names.contains("A"))
+        assertFalse(names.contains("a"))
+    }
+
+    @Test
+    fun renameCaseOnlyRejectsDistinctExistingFileOnCaseSensitiveFilesystem() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val provider = LocalVfsProvider(ioDispatcher = dispatcher)
+
+        val dir = tempFolder.newFolder("case_sensitive_collision")
+        val source = File(dir, "a").apply { writeText("lower-content") }
+        val dest = File(dir, "A")
+
+        Assume.assumeFalse("Filesystem is case-insensitive", dest.exists())
+        dest.writeText("upper-content")
+        Assume.assumeFalse(
+            "Filesystem treats 'a' and 'A' as the same file",
+            Files.isSameFile(source.toPath(), dest.toPath())
+        )
+
+        val result = provider.rename(source.absolutePath, dest.absolutePath)
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is IOException)
+        assertTrue(source.exists())
+        assertEquals("lower-content", source.readText())
+        assertTrue(dest.exists())
+        assertEquals("upper-content", dest.readText())
     }
 }

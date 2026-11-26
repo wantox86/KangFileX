@@ -161,7 +161,7 @@ class LocalVfsProvider(
                 if (!source.exists()) {
                     throw FileNotFoundException("Source does not exist: $oldPath")
                 }
-                if (dest.exists()) {
+                if (dest.exists() && !isCaseOnlySameFileRename(source, dest)) {
                     throw IOException("Destination already exists: $newPath")
                 }
                 if (!source.renameTo(dest)) {
@@ -188,6 +188,23 @@ class LocalVfsProvider(
             }
         }
         return dir.delete()
+    }
+
+    private fun isCaseOnlySameFileRename(source: File, dest: File): Boolean {
+        if (!dest.name.equals(source.name, ignoreCase = true)) return false
+        val sameParent = try {
+            val sourceParent = source.parentFile?.canonicalFile ?: source.absoluteFile.parentFile
+            val destParent = dest.parentFile?.canonicalFile ?: dest.absoluteFile.parentFile
+            sourceParent != null && sourceParent == destParent
+        } catch (_: Throwable) {
+            source.absoluteFile.parentFile == dest.absoluteFile.parentFile
+        }
+        if (!sameParent) return false
+        return try {
+            Files.isSameFile(source.toPath(), dest.toPath())
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private fun isSymbolicLinkSafe(file: File): Boolean {

@@ -32,6 +32,9 @@ sealed interface FileOpDialogState {
 
 object FileNameValidator {
     fun validate(name: String): String? {
+        if (name.contains('\u0000')) {
+            return "Nama tidak boleh mengandung karakter NUL"
+        }
         val trimmed = name.trim()
         return when {
             trimmed.isEmpty() -> "Nama tidak boleh kosong"
