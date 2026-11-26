@@ -74,15 +74,15 @@ class TransferForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { drainPendingOutcomes(TransferQueueManager.getInstance()) }
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun startOutcomeObserver(manager: TransferQueueManager) {
         serviceScope.launch {
-            manager.notificationOutcomes.collect { outcome ->
-                val notification = buildResultNotification(outcome)
-                notifySafe(nextResultNotificationId(), notification)
+            manager.outcomeSignals.collect {
+                drainPendingOutcomes(manager)
             }
         }
     }
@@ -107,11 +107,15 @@ class TransferForegroundService : Service() {
         }
     }
 
-    private fun drainOutcomesAndStop(manager: TransferQueueManager) {
+    private fun drainPendingOutcomes(manager: TransferQueueManager) {
         while (true) {
             val outcome = manager.pollNotificationOutcome() ?: break
             notifySafe(nextResultNotificationId(), buildResultNotification(outcome))
         }
+    }
+
+    private fun drainOutcomesAndStop(manager: TransferQueueManager) {
+        drainPendingOutcomes(manager)
         stopForegroundCompat()
         stopSelf()
     }

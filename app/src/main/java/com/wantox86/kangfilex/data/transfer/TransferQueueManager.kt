@@ -90,6 +90,7 @@ class TransferQueueManager(
     val outcomes: SharedFlow<TransferOutcome> = _outcomes.asSharedFlow()
 
     private val _notificationOutcomes = Channel<TransferOutcome>(Channel.UNLIMITED)
+    private val outcomeSignal = Channel<Unit>(Channel.CONFLATED)
 
     /**
      * Aliran outcome khusus untuk SATU konsumen (service notifikasi).
@@ -98,6 +99,14 @@ class TransferQueueManager(
      */
     val notificationOutcomes: Flow<TransferOutcome>
         get() = _notificationOutcomes.receiveAsFlow()
+
+    /**
+     * Sinyal conflated setiap kali outcome baru masuk ke antrean notifikasi.
+     * Konsumen cukup memanggil [pollNotificationOutcome] secara sinkron sehingga outcome
+     * tidak pernah hilang bila coroutine dibatalkan di antara receive dan pemrosesan.
+     */
+    val outcomeSignals: Flow<Unit>
+        get() = outcomeSignal.receiveAsFlow()
 
     /**
      * Mengambil satu outcome notifikasi yang dibuffer tanpa menangguhkan coroutine, atau `null`
@@ -305,6 +314,7 @@ class TransferQueueManager(
 
         if (finalOutcome != null) {
             _notificationOutcomes.trySend(finalOutcome)
+            outcomeSignal.trySend(Unit)
             _outcomes.emit(finalOutcome)
         }
     }

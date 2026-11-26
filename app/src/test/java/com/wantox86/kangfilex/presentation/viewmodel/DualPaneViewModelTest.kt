@@ -49,8 +49,10 @@ class DualPaneViewModelTest {
     )
 
     private class FakeVfsProvider(
-        private val tree: Map<String, List<VfsFile>>
+        initialTree: Map<String, List<VfsFile>>
     ) : VfsProvider {
+        private val tree: MutableMap<String, List<VfsFile>> = initialTree.toMutableMap()
+        val listFilesCalls = mutableListOf<String>()
         val createdDirectories = mutableListOf<String>()
         val renamedPaths = mutableListOf<Pair<String, String>>()
         val deletedPaths = mutableListOf<Pair<String, Boolean>>()
@@ -60,12 +62,20 @@ class DualPaneViewModelTest {
             tree.values.forEach { list -> list.forEach { add(it.path) } }
         }
 
+        fun setChildren(path: String, files: List<VfsFile>) {
+            tree[path] = files
+            existingPaths.add(path)
+            files.forEach { existingPaths.add(it.path) }
+        }
+
         override val providerId: String = "local"
         override suspend fun connect(): Result<Unit> = Result.success(Unit)
         override suspend fun disconnect() {}
         override suspend fun isConnected(): Boolean = true
-        override suspend fun listFiles(path: String): Result<List<VfsFile>> =
-            Result.success(tree[path].orEmpty())
+        override suspend fun listFiles(path: String): Result<List<VfsFile>> {
+            listFilesCalls.add(path)
+            return Result.success(tree[path].orEmpty())
+        }
         override suspend fun openInputStream(path: String): InputStream = ByteArrayInputStream(ByteArray(0))
         override suspend fun openOutputStream(path: String, overwrite: Boolean): OutputStream {
             openedOutputs.add(path)
@@ -670,5 +680,90 @@ class DualPaneViewModelTest {
         )
         assertNull(vm.uiState.value.fileOpDialog)
         assertEquals(0, vm.uiState.value.leftPane.selectedCount)
+    }
+
+    @Test
+    fun refreshInvalidatesCollapsedFolderCacheSoReExpandLoadsFreshChildren() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val (vm, provider) = createViewModelWithProvider(backgroundScope, dispatcher)
+        val downloadPath = "/storage/emulated/0/Download"
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // 1. Expand Download -> anak dimuat dari provider
+        val downloadNode = vm.uiState.value.leftPane.nodes.first { it.file.name == "Download" }
+        vm.onNodeClick(PaneId.LEFT, downloadNode)
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.leftPane.nodes.any { it.file.name == "app.apk" })
+        val callsAfterFirstExpand = provider.listFilesCalls.count { it == downloadPath }
+        assertEquals(1, callsAfterFirstExpand)
+
+        // 2. Collapse Download dan pindahkan fokus ke root
+        vm.onUpDir(PaneId.LEFT)
+        assertEquals("/storage/emulated/0", vm.uiState.value.leftPane.focusedPath)
+        assertFalse(vm.uiState.value.leftPane.nodes.any { it.file.name == "app.apk" })
+
+        // 3. Ubah isi Download di fake provider lalu refresh
+        provider.setChildren(
+            downloadPath,
+            listOf(
+                VfsFile("app.apk", "$downloadPath/app.apk", false, 2048L, 2000L, "local"),
+                VfsFile("FolderBaru", "$downloadPath/FolderBaru", true, 0L, 3000L, "local")
+            )
+        )
+        vm.onRefresh(PaneId.LEFT)
+        advanceUntilIdle()
+        assertEquals(callsAfterFirstExpand, provider.listFilesCalls.count { it == downloadPath })
+
+        // 4. Expand Download lagi -> provider dipanggil ulang dan anak terbaru tampil
+        val collapsedDownload = vm.uiState.value.leftPane.nodes.first { it.file.name == "Download" }
+        vm.onNodeClick(PaneId.LEFT, collapsedDownload)
+        advanceUntilIdle()
+
+        assertEquals(callsAfterFirstExpand + 1, provider.listFilesCalls.count { it == downloadPath })
+        val childNames = vm.uiState.value.leftPane.nodes.map { it.file.name }
+        assertTrue(childNames.contains("FolderBaru"))
+        assertTrue(childNames.contains("app.apk"))
+    }
+
+    @Test
+    fun refreshReloadsCollapsedFocusedFolderWithoutExpandingIt() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val (vm, provider) = createViewModelWithProvider(backgroundScope, dispatcher)
+        val downloadPath = "/storage/emulated/0/Download"
+
+        vm.onPermissionChanged(true)
+        advanceUntilIdle()
+
+        // Expand Download lalu klik lagi agar collapse tetapi fokus tetap di Download
+        val downloadNode = vm.uiState.value.leftPane.nodes.first { it.file.name == "Download" }
+        vm.onNodeClick(PaneId.LEFT, downloadNode)
+        advanceUntilIdle()
+        val expandedDownload = vm.uiState.value.leftPane.nodes.first { it.file.name == "Download" }
+        vm.onNodeClick(PaneId.LEFT, expandedDownload)
+        assertEquals(downloadPath, vm.uiState.value.leftPane.focusedPath)
+        assertFalse(vm.uiState.value.leftPane.nodes.first { it.file.name == "Download" }.isExpanded)
+        assertEquals(0 to 1, vm.uiState.value.leftPane.focusedDirChildCount)
+
+        // Ubah isi Download di provider lalu refresh
+        provider.setChildren(
+            downloadPath,
+            listOf(
+                VfsFile("app.apk", "$downloadPath/app.apk", false, 2048L, 2000L, "local"),
+                VfsFile("Baru", "$downloadPath/Baru", true, 0L, 3000L, "local")
+            )
+        )
+        vm.onRefresh(PaneId.LEFT)
+        advanceUntilIdle()
+
+        // Tetap collapse, hitungan header fokus terbarui, dan expand langsung menampilkan data baru
+        val afterRefresh = vm.uiState.value.leftPane
+        assertFalse(afterRefresh.nodes.first { it.file.name == "Download" }.isExpanded)
+        assertEquals(1 to 1, afterRefresh.focusedDirChildCount)
+
+        vm.onNodeClick(PaneId.LEFT, afterRefresh.nodes.first { it.file.name == "Download" })
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.leftPane.nodes.any { it.file.name == "Baru" })
     }
 }

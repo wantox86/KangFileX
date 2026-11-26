@@ -230,4 +230,36 @@ class TreeStateManagerTest {
         manager.clearSelection()
         assertTrue(manager.getSelectedFiles().isEmpty())
     }
+
+    @Test
+    fun invalidateCollapsedChildrenDropsCollapsedButKeepsExpandedAndFocused() {
+        val manager = TreeStateManager("local")
+        manager.setVolumes(listOf(internalVolume))
+
+        val rootPath = "/storage/emulated/0"
+        val downloadPath = "$rootPath/Download"
+        val musicPath = "$rootPath/Music"
+
+        val rootId = manager.nodeId(rootPath)
+        val downloadId = manager.nodeId(downloadPath)
+        val musicId = manager.nodeId(musicPath)
+
+        manager.setExpanded(rootId, true)
+        manager.setChildren(rootId, listOf(dir(downloadPath, "Download"), dir(musicPath, "Music")))
+        manager.setChildren(downloadId, listOf(file("$downloadPath/a.apk", "a.apk")))
+        manager.setChildren(musicId, listOf(file("$musicPath/song.mp3", "song.mp3")))
+
+        // Download collapsed dan jadi fokus; Music collapsed dan bukan fokus; Root expanded
+        manager.setFocusedTarget(downloadPath)
+
+        assertTrue(manager.hasLoadedChildren(rootId))
+        assertTrue(manager.hasLoadedChildren(downloadId))
+        assertTrue(manager.hasLoadedChildren(musicId))
+
+        manager.invalidateCollapsedChildren()
+
+        assertTrue(manager.hasLoadedChildren(rootId))
+        assertTrue(manager.hasLoadedChildren(downloadId))
+        assertFalse(manager.hasLoadedChildren(musicId))
+    }
 }

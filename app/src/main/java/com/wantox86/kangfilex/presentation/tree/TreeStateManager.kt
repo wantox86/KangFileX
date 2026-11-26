@@ -99,6 +99,17 @@ class TreeStateManager(
         volumes.firstOrNull()?.let { focusedTargetPath = it.rootPath }
     }
 
+    /**
+     * Menghapus cache anak ([childrenByNodeId]) untuk node yang tidak sedang expanded
+     * dan bukan node fokus saat ini agar dimuat ulang saat di-expand kembali.
+     */
+    fun invalidateCollapsedChildren() {
+        val focusedId = focusedTargetPath?.let { nodeId(it) }
+        childrenByNodeId.keys.retainAll { id ->
+            expandedIds.contains(id) || id == focusedId
+        }
+    }
+
     fun toggleSelection(nodeId: String) {
         if (!selectedIds.add(nodeId)) {
             selectedIds.remove(nodeId)

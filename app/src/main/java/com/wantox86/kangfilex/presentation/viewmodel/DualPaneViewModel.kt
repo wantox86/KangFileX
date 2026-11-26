@@ -544,6 +544,7 @@ class DualPaneViewModel(
         val tree = treeFor(paneId)
         val volumes = withContext(ioDispatcher) { storageVolumeProvider.getVolumes() }
         tree.setVolumes(volumes)
+        tree.invalidateCollapsedChildren()
         updatePane(paneId) { it.copy(isLoading = true, errorMessage = null) }
 
         val expandedPaths = tree.getExpandedPaths()
@@ -559,6 +560,15 @@ class DualPaneViewModel(
                 loadChildrenInternal(paneId, tree.nodeId(path), path)
             }
         }
+
+        val focusedPath = tree.getFocusedPath()
+        if (focusedPath != null) {
+            val focusedId = tree.nodeId(focusedPath)
+            if (!tree.isExpanded(focusedId) && tree.hasLoadedChildren(focusedId)) {
+                loadChildrenInternal(paneId, focusedId, focusedPath)
+            }
+        }
+
         updatePane(paneId) { it.copy(isLoading = false) }
         syncPane(paneId)
     }
