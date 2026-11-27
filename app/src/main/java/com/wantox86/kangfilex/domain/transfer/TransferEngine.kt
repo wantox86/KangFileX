@@ -188,6 +188,7 @@ class TransferEngine(
 
             // Symlink folder dilewati agar tidak menyalin/menghapus target symlink dan menjaga folder induk pada MOVE
             if (source.isDirectory && source.isSymlink) {
+                filesSkipped += 1
                 errors.add("Folder '${source.name}' adalah symlink dan dilewati (symlink folder tidak didukung)")
                 emitProgress(currentFileName = source.name, force = true)
                 return false

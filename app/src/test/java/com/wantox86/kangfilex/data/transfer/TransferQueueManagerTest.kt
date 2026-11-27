@@ -568,6 +568,73 @@ class TransferQueueManagerTest {
         }
     }
 
+    @Test
+    fun outcomeSignalsEmitWhileOutcomesRemainPollableAcrossSequentialJobs() = runBlocking {
+        val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val provider = LocalVfsProvider(ioDispatcher = Dispatchers.IO)
+        val manager = TransferQueueManager(
+            vfsProvider = provider,
+            scope = managerScope,
+            ioDispatcher = Dispatchers.IO
+        )
+
+        try {
+            val srcDir = tempFolder.newFolder("src_signal_notif")
+            val dstDir = tempFolder.newFolder("dst_signal_notif")
+            val file1 = File(srcDir, "one.txt").apply { writeText("satu") }
+            val file2 = File(srcDir, "two.txt").apply { writeText("dua") }
+
+            // 1. Job pertama: outcomeSignals memancarkan sinyal, outcome tetap ada sampai di-poll
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-signal-1",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(file1)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+            withTimeout(5_000) { manager.outcomeSignals.first() }
+            withTimeout(5_000) { manager.state.first { !it.isBusy } }
+
+            val firstPolled = manager.pollNotificationOutcome()
+            assertTrue(firstPolled is TransferOutcome.Completed)
+            assertEquals("job-signal-1", firstPolled?.jobId)
+            assertNull(manager.pollNotificationOutcome())
+
+            // 2. Dua job berturut-turut tanpa mengonsumsi sinyal -> kedua outcome tetap bisa di-poll semua
+            val file3 = File(srcDir, "three.txt").apply { writeText("tiga") }
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-signal-2",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(file2)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+            withTimeout(5_000) { manager.state.first { !it.isBusy } }
+
+            manager.enqueue(
+                TransferRequest(
+                    jobId = "job-signal-3",
+                    operation = TransferOperation.COPY,
+                    sources = listOf(toVfsFile(file3)),
+                    destDirPath = dstDir.absolutePath
+                )
+            )
+            withTimeout(5_000) { manager.state.first { !it.isBusy } }
+
+            val secondPolled = manager.pollNotificationOutcome()
+            val thirdPolled = manager.pollNotificationOutcome()
+            assertTrue(secondPolled is TransferOutcome.Completed)
+            assertEquals("job-signal-2", secondPolled?.jobId)
+            assertTrue(thirdPolled is TransferOutcome.Completed)
+            assertEquals("job-signal-3", thirdPolled?.jobId)
+            assertNull(manager.pollNotificationOutcome())
+        } finally {
+            managerScope.cancel()
+        }
+    }
+
     private fun collectOutcomes(
         scope: CoroutineScope,
         manager: TransferQueueManager

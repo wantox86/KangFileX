@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -74,15 +75,16 @@ class TransferForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { drainPendingOutcomes(TransferQueueManager.getInstance()) }
+            .onFailure { Log.w("TransferFgService", "Gagal drain outcome saat onDestroy: ${it.javaClass.simpleName}") }
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun startOutcomeObserver(manager: TransferQueueManager) {
         serviceScope.launch {
-            manager.notificationOutcomes.collect { outcome ->
-                val notification = buildResultNotification(outcome)
-                notifySafe(nextResultNotificationId(), notification)
+            manager.outcomeSignals.collect {
+                drainPendingOutcomes(manager)
             }
         }
     }
@@ -107,11 +109,15 @@ class TransferForegroundService : Service() {
         }
     }
 
-    private fun drainOutcomesAndStop(manager: TransferQueueManager) {
+    private fun drainPendingOutcomes(manager: TransferQueueManager) {
         while (true) {
             val outcome = manager.pollNotificationOutcome() ?: break
             notifySafe(nextResultNotificationId(), buildResultNotification(outcome))
         }
+    }
+
+    private fun drainOutcomesAndStop(manager: TransferQueueManager) {
+        drainPendingOutcomes(manager)
         stopForegroundCompat()
         stopSelf()
     }

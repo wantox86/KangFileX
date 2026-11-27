@@ -1,10 +1,12 @@
 package com.wantox86.kangfilex.presentation.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,10 +30,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,7 +52,8 @@ fun ConflictResolutionDialog(
     info: ConflictInfo,
     onDecision: (ConflictDecision) -> Unit
 ) {
-    var applyToAll by remember(info) { mutableStateOf(false) }
+    var applyToAll by rememberSaveable(info) { mutableStateOf(false) }
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     AlertDialog(
         onDismissRequest = {},
@@ -71,7 +76,8 @@ fun ConflictResolutionDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
@@ -83,15 +89,34 @@ fun ConflictResolutionDialog(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                FileComparisonCard(
-                    label = "Sumber",
-                    file = info.sourceFile
-                )
+                if (isLandscape) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FileComparisonCard(
+                            label = "Sumber",
+                            file = info.sourceFile,
+                            modifier = Modifier.weight(1f)
+                        )
 
-                FileComparisonCard(
-                    label = "Tujuan",
-                    file = info.existingDest
-                )
+                        FileComparisonCard(
+                            label = "Tujuan",
+                            file = info.existingDest,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                } else {
+                    FileComparisonCard(
+                        label = "Sumber",
+                        file = info.sourceFile
+                    )
+
+                    FileComparisonCard(
+                        label = "Tujuan",
+                        file = info.existingDest
+                    )
+                }
 
                 HorizontalDivider(color = KangColors.Divider, thickness = 1.dp)
 
@@ -122,58 +147,134 @@ fun ConflictResolutionDialog(
             }
         },
         confirmButton = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        onDecision(
-                            ConflictDecision(
-                                action = ConflictAction.OVERWRITE,
-                                applyToAll = applyToAll
-                            )
-                        )
-                    },
+            if (isLandscape) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = KangColors.AccentOrange,
-                        contentColor = KangColors.Background
-                    )
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Timpa", fontWeight = FontWeight.SemiBold)
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        onDecision(
-                            ConflictDecision(
-                                action = ConflictAction.AUTO_RENAME,
-                                applyToAll = applyToAll
+                    Button(
+                        onClick = {
+                            onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.OVERWRITE,
+                                    applyToAll = applyToAll
+                                )
                             )
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = KangColors.AccentOrange,
+                            contentColor = KangColors.Background
                         )
-                    },
+                    ) {
+                        Text(
+                            text = "Timpa",
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.AUTO_RENAME,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        border = BorderStroke(1.dp, KangColors.Divider),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = KangColors.TextPrimary
+                        )
+                    ) {
+                        Text(
+                            text = "Rename",
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    TextButton(
+                        onClick = {
+                            onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.SKIP,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Lewati",
+                            color = KangColors.TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            } else {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    border = BorderStroke(1.dp, KangColors.Divider),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = KangColors.TextPrimary
-                    )
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Ganti Nama Otomatis", fontWeight = FontWeight.Medium)
-                }
-
-                TextButton(
-                    onClick = {
-                        onDecision(
-                            ConflictDecision(
-                                action = ConflictAction.SKIP,
-                                applyToAll = applyToAll
+                    Button(
+                        onClick = {
+                            onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.OVERWRITE,
+                                    applyToAll = applyToAll
+                                )
                             )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = KangColors.AccentOrange,
+                            contentColor = KangColors.Background
                         )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Lewati", color = KangColors.TextSecondary)
+                    ) {
+                        Text("Timpa", fontWeight = FontWeight.SemiBold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.AUTO_RENAME,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, KangColors.Divider),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = KangColors.TextPrimary
+                        )
+                    ) {
+                        Text("Ganti Nama Otomatis", fontWeight = FontWeight.Medium)
+                    }
+
+                    TextButton(
+                        onClick = {
+                            onDecision(
+                                ConflictDecision(
+                                    action = ConflictAction.SKIP,
+                                    applyToAll = applyToAll
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Lewati", color = KangColors.TextSecondary)
+                    }
                 }
             }
         }
@@ -183,7 +284,8 @@ fun ConflictResolutionDialog(
 @Composable
 private fun FileComparisonCard(
     label: String,
-    file: VfsFile?
+    file: VfsFile?,
+    modifier: Modifier = Modifier
 ) {
     val sizeText = when {
         file == null -> "tidak diketahui"
@@ -196,7 +298,7 @@ private fun FileComparisonCard(
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(KangColors.SurfaceElevated)

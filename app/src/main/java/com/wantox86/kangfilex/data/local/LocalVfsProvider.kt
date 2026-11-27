@@ -13,11 +13,13 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 class LocalVfsProvider(
     override val providerId: String = DEFAULT_PROVIDER_ID,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val renameOp: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
 ) : VfsProvider {
 
     private val connected = AtomicBoolean(true)
@@ -162,9 +164,13 @@ class LocalVfsProvider(
                     throw FileNotFoundException("Source does not exist: $oldPath")
                 }
                 if (dest.exists()) {
+                    if (isCaseOnlySameFileRename(source, dest)) {
+                        renameCaseOnly(source, dest)
+                        return@runCatching
+                    }
                     throw IOException("Destination already exists: $newPath")
                 }
-                if (!source.renameTo(dest)) {
+                if (!renameOp(source, dest)) {
                     throw IOException("Failed to rename $oldPath to $newPath")
                 }
             }
@@ -188,6 +194,63 @@ class LocalVfsProvider(
             }
         }
         return dir.delete()
+    }
+
+    private fun renameCaseOnly(source: File, dest: File) {
+        val parent = source.absoluteFile.parentFile
+            ?: throw IOException("Cannot determine parent directory for ${source.path}")
+
+        var tmp: File? = null
+        repeat(5) {
+            if (tmp == null) {
+                val candidate = File(parent, ".kfx-rename-${UUID.randomUUID()}")
+                if (!candidate.exists() && !isSymbolicLinkSafe(candidate)) {
+                    tmp = candidate
+                }
+            }
+        }
+        val tempFile = tmp
+            ?: throw IOException("Failed to allocate temporary name for ${source.path}")
+
+        if (!renameOp(source, tempFile)) {
+            throw IOException("Failed to rename ${source.path} to ${dest.path} (step 1)")
+        }
+
+        if (!renameOp(tempFile, dest)) {
+            try {
+                renameOp(tempFile, source)
+            } catch (_: Throwable) {
+                // Best-effort rollback; always report step 2 failure below.
+            }
+            throw IOException(
+                "Failed to rename ${source.path} to ${dest.path} (step 2), restored original name"
+            )
+        }
+
+        val actualNames = parent.list()
+        if (actualNames == null || !actualNames.contains(dest.name)) {
+            throw IOException(
+                "Rename succeeded but filesystem name did not change to '${dest.name}'"
+            )
+        }
+    }
+
+    private fun isCaseOnlySameFileRename(source: File, dest: File): Boolean {
+        if (!dest.name.equals(source.name, ignoreCase = true)) return false
+        val sameParent = try {
+            val sourceParent = source.parentFile?.canonicalFile ?: source.absoluteFile.parentFile
+            val destParent = dest.parentFile?.canonicalFile ?: dest.absoluteFile.parentFile
+            sourceParent != null && sourceParent == destParent
+        } catch (_: Throwable) {
+            source.absoluteFile.parentFile == dest.absoluteFile.parentFile
+        }
+        if (!sameParent) return false
+        if (isSymbolicLinkSafe(dest)) return false
+        return try {
+            Files.isSameFile(source.toPath(), dest.toPath())
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private fun isSymbolicLinkSafe(file: File): Boolean {

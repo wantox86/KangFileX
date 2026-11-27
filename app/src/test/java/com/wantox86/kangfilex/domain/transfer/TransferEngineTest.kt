@@ -515,6 +515,7 @@ class TransferEngineTest {
         )
 
         assertEquals(0, result.filesTransferred)
+        assertEquals(1, result.filesSkipped)
         assertEquals(1, result.errors.size)
         assertTrue(result.errors.first().contains("symlink", ignoreCase = true))
 
@@ -555,6 +556,7 @@ class TransferEngineTest {
         )
 
         assertEquals(0, result.filesTransferred)
+        assertEquals(1, result.filesSkipped)
         assertTrue(result.errors.isNotEmpty())
         assertTrue(result.errors.first().contains("symlink", ignoreCase = true))
         assertTrue(Files.isSymbolicLink(symlinkDir.toPath()))
@@ -596,6 +598,7 @@ class TransferEngineTest {
         )
 
         assertEquals(1, result.filesTransferred)
+        assertEquals(1, result.filesSkipped)
         assertEquals(1, result.errors.size)
         assertTrue(result.errors.first().contains("symlink", ignoreCase = true))
         assertEquals("NORMAL_CONTENT", File(dstDir, "outer/normal.txt").readText())
